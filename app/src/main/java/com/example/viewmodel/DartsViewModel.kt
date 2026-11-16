@@ -30,8 +30,7 @@ data class PendingSubWin(
     val setsWon: Int,
     val legsWon: Int,
     val nextLeg: Int,
-    val nextSet: Int,
-    val noticeText: String
+    val nextSet: Int
 )
 
 data class ActiveMatchState(
@@ -41,15 +40,11 @@ data class ActiveMatchState(
     val currentLeg: Int = 1,
     val currentSet: Int = 1,
     val legStarterIndex: Int = 0,
-    val lastLegNotice: String? = null,
     val isMatchOver: Boolean = false,
     val winner: PlayerGameState? = null,
     val pendingSubWin: PendingSubWin? = null,
     val tournamentMatchId: String? = null,
     val currentDarts: List<DartThrow> = emptyList(),
-    val keypadBuffer: String = "",
-    val claimedDoubleIn: Boolean = false,
-    val claimedDoubleOut: Boolean = false,
     val isBustFeedback: Boolean = false,
     val turnHistory: List<TurnHistorySnapshot> = emptyList()
 ) {
@@ -63,7 +58,6 @@ data class TurnHistorySnapshot(
     val previousLeg: Int,
     val previousSet: Int,
     val previousLegStarterIndex: Int,
-    val previousLastLegNotice: String?,
     val turnScore: TurnScore
 )
 
@@ -171,57 +165,63 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportPlayersJson(): String {
-        val players = allPlayers.value
+    fun exportPlayersJson(players: List<Player> = allPlayers.value): String {
         val jsonArray = JSONArray()
         for (p in players) {
-            val obj = JSONObject().apply {
-                put("id", p.id)
-                put("name", p.name)
-                put("wins", p.wins)
-                put("losses", p.losses)
-                put("matchesPlayed", p.matchesPlayed)
-                put("createdAt", p.createdAt)
-            }
-            jsonArray.put(obj)
+            jsonArray.put(
+                JSONObject().apply {
+                    put("id", p.id)
+                    put("name", p.name)
+                    put("wins", p.wins)
+                    put("losses", p.losses)
+                    put("matchesPlayed", p.matchesPlayed)
+                    put("createdAt", p.createdAt)
+                }
+            )
         }
         return jsonArray.toString(2)
     }
 
+    suspend fun exportPlayersJsonAsync(players: List<Player> = allPlayers.value): String =
+        withContext(Dispatchers.Default) { exportPlayersJson(players) }
+
     suspend fun importPlayersJson(jsonStr: String, replaceAll: Boolean = false): Result<Int> {
         return try {
-            val trimmed = jsonStr
-                .replace("\uFEFF", "")
-                .replace("\u0000", "")
-                .trim()
-            val jsonArray = if (trimmed.startsWith("[")) {
-                JSONArray(trimmed)
-            } else if (trimmed.startsWith("{")) {
-                val root = JSONObject(trimmed)
-                root.optJSONArray("players") ?: JSONArray().apply { put(root) }
-            } else {
-                return Result.failure(IllegalArgumentException("Invalid JSON format. Expected JSON array or object."))
-            }
-
-            val parsedPlayers = mutableListOf<Player>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val name = obj.optString("name", "").trim()
-                if (name.isNotEmpty()) {
-                    val wins = obj.optInt("wins", 0)
-                    val losses = obj.optInt("losses", 0)
-                    val matchesPlayed = obj.optInt("matchesPlayed", wins + losses)
-                    val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
-                    parsedPlayers.add(
-                        Player(
-                            name = name,
-                            wins = wins,
-                            losses = losses,
-                            matchesPlayed = matchesPlayed,
-                            createdAt = createdAt
-                        )
-                    )
+            val parsedPlayers = withContext(Dispatchers.Default) {
+                val trimmed = jsonStr
+                    .replace("\uFEFF", "")
+                    .replace("\u0000", "")
+                    .trim()
+                val jsonArray = if (trimmed.startsWith("[")) {
+                    JSONArray(trimmed)
+                } else if (trimmed.startsWith("{")) {
+                    val root = JSONObject(trimmed)
+                    root.optJSONArray("players") ?: JSONArray().apply { put(root) }
+                } else {
+                    throw IllegalArgumentException("Invalid JSON format. Expected JSON array or object.")
                 }
+
+                val list = ArrayList<Player>(jsonArray.length())
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val name = obj.optString("name", "").trim()
+                    if (name.isNotEmpty()) {
+                        val wins = obj.optInt("wins", 0)
+                        val losses = obj.optInt("losses", 0)
+                        val matchesPlayed = obj.optInt("matchesPlayed", wins + losses)
+                        val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                        list.add(
+                            Player(
+                                name = name,
+                                wins = wins,
+                                losses = losses,
+                                matchesPlayed = matchesPlayed,
+                                createdAt = createdAt
+                            )
+                        )
+                    }
+                }
+                list
             }
 
             if (parsedPlayers.isEmpty()) {
@@ -229,19 +229,17 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             withContext(Dispatchers.IO) {
-                val existing = repository.getAllPlayersList()
                 if (replaceAll) {
-                    for (p in existing) {
-                        repository.deletePlayer(p)
-                    }
-                    for (np in parsedPlayers) {
-                        repository.insertPlayer(np.copy(id = 0L))
-                    }
+                    repository.replaceAllPlayers(parsedPlayers)
                 } else {
+                    val existingByName = repository.getAllPlayersList()
+                        .associateBy { it.name.lowercase() }
+                    val toInsert = mutableListOf<Player>()
+                    val toUpdate = mutableListOf<Player>()
                     for (np in parsedPlayers) {
-                        val match = existing.find { it.name.equals(np.name, ignoreCase = true) }
+                        val match = existingByName[np.name.lowercase()]
                         if (match != null) {
-                            repository.updatePlayer(
+                            toUpdate.add(
                                 match.copy(
                                     wins = np.wins,
                                     losses = np.losses,
@@ -249,9 +247,10 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                             )
                         } else {
-                            repository.insertPlayer(np.copy(id = 0L))
+                            toInsert.add(np)
                         }
                     }
+                    repository.mergeImportedPlayers(toInsert, toUpdate)
                 }
             }
             Result.success(parsedPlayers.size)
@@ -289,16 +288,6 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
         _selectedPlayerIds.update { list -> list.filter { it != playerId } }
     }
 
-    fun togglePlayerSelection(playerId: Long) {
-        _selectedPlayerIds.update { current ->
-            if (current.contains(playerId)) {
-                current.filter { it != playerId }
-            } else {
-                current + playerId
-            }
-        }
-    }
-
     fun reorderSelectedPlayers(fromIndex: Int, toIndex: Int) {
         _selectedPlayerIds.update { list ->
             if (fromIndex in list.indices && toIndex in list.indices && fromIndex != toIndex) {
@@ -310,23 +299,6 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                 list
             }
         }
-    }
-
-    fun moveSelectedPlayerUp(index: Int) {
-        if (index > 0) {
-            reorderSelectedPlayers(index, index - 1)
-        }
-    }
-
-    fun moveSelectedPlayerDown(index: Int) {
-        val size = _selectedPlayerIds.value.size
-        if (index < size - 1) {
-            reorderSelectedPlayers(index, index + 1)
-        }
-    }
-
-    fun selectAllPlayers(players: List<Player>) {
-        _selectedPlayerIds.value = players.map { it.id }
     }
 
     fun clearPlayerSelection() {
@@ -341,11 +313,10 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
         rulesOverride: GameRules? = null
     ) {
         val playerIds = customPlayerIds ?: _selectedPlayerIds.value
-        val playersList = allPlayers.value.filter { playerIds.contains(it.id) }
-        if (playersList.isEmpty()) return
+        val playersById = allPlayers.value.associateBy { it.id }
+        val sortedPlayers = playerIds.mapNotNull { playersById[it] }
+        if (sortedPlayers.isEmpty()) return
 
-        // Maintain order of selected player ids
-        val sortedPlayers = playerIds.mapNotNull { id -> playersList.find { it.id == id } }
         val rules = rulesOverride ?: GameRules(
             gameType = _selectedGameType.value,
             doubleIn = _doubleIn.value,
@@ -358,120 +329,18 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             PlayerGameState(
                 player = player,
                 currentScore = rules.gameType.targetScore,
-                hasDoubleInAchieved = !rules.doubleIn,
-                turns = emptyList(),
-                legsWon = 0,
-                setsWon = 0,
-                isWinner = false
+                hasDoubleInAchieved = !rules.doubleIn
             )
         }
 
         _activeMatch.value = ActiveMatchState(
             rules = rules,
             players = playerStates,
-            currentPlayerIndex = 0,
-            currentLeg = 1,
-            currentSet = 1,
-            legStarterIndex = 0,
-            lastLegNotice = null,
-            isMatchOver = false,
-            winner = null,
-            tournamentMatchId = tournamentMatchId,
-            currentDarts = emptyList(),
-            keypadBuffer = "",
-            claimedDoubleIn = false,
-            claimedDoubleOut = false,
-            isBustFeedback = false,
-            turnHistory = emptyList()
+            tournamentMatchId = tournamentMatchId
         )
     }
 
     // ==================== LIVE SCORING ACTIONS ====================
-
-    fun onKeypadDigit(digit: String) {
-        _activeMatch.update { match ->
-            match?.let {
-                if (it.isMatchOver) return@let it
-                val newBuffer = if (it.keypadBuffer == "0" && digit != "0") digit else (it.keypadBuffer + digit)
-                val numericVal = newBuffer.toIntOrNull() ?: 0
-                if (numericVal <= 180 && newBuffer.length <= 3) {
-                    val remainingAfter = (it.currentPlayer?.currentScore ?: 0) - numericVal
-                    val autoDoubleOut = (remainingAfter == 0 && it.rules.doubleOut)
-                    it.copy(
-                        keypadBuffer = newBuffer,
-                        claimedDoubleOut = if (autoDoubleOut) true else it.claimedDoubleOut
-                    )
-                } else {
-                    it
-                }
-            }
-        }
-    }
-
-    fun onKeypadBackspace() {
-        _activeMatch.update { match ->
-            match?.let {
-                if (it.keypadBuffer.isNotEmpty()) {
-                    it.copy(keypadBuffer = it.keypadBuffer.dropLast(1))
-                } else {
-                    it
-                }
-            }
-        }
-    }
-
-    fun onKeypadClear() {
-        _activeMatch.update { match ->
-            match?.copy(keypadBuffer = "", claimedDoubleIn = false, claimedDoubleOut = false)
-        }
-    }
-
-    fun setQuickPoints(points: Int) {
-        _activeMatch.update { match ->
-            match?.let {
-                val remainingAfter = (it.currentPlayer?.currentScore ?: 0) - points
-                val autoDoubleOut = (remainingAfter == 0 && it.rules.doubleOut)
-                it.copy(
-                    keypadBuffer = points.toString(),
-                    claimedDoubleOut = if (autoDoubleOut) true else it.claimedDoubleOut
-                )
-            }
-        }
-    }
-
-    fun toggleClaimedDoubleIn() {
-        _activeMatch.update { match ->
-            match?.copy(claimedDoubleIn = !match.claimedDoubleIn)
-        }
-    }
-
-    fun toggleClaimedDoubleOut() {
-        _activeMatch.update { match ->
-            match?.copy(claimedDoubleOut = !match.claimedDoubleOut)
-        }
-    }
-
-    fun submitKeypadTurn() {
-        val match = _activeMatch.value ?: return
-        if (match.isMatchOver || match.pendingSubWin != null) return
-        val currentP = match.currentPlayer ?: return
-
-        val points = match.keypadBuffer.toIntOrNull() ?: 0
-
-        val turnScore = DartsEngine.evaluateTurnPoints(
-            playerId = currentP.player.id,
-            turnIndex = currentP.turns.size + 1,
-            scoreBefore = currentP.currentScore,
-            enteredPoints = points,
-            rules = match.rules,
-            hasDoubleIn = currentP.hasDoubleInAchieved,
-            claimedDoubleIn = match.claimedDoubleIn,
-            claimedDoubleOut = match.claimedDoubleOut,
-            dartsCountUsed = 3
-        )
-
-        applyTurnScore(turnScore)
-    }
 
     fun addDartThrow(dart: DartThrow) {
         val match = _activeMatch.value ?: return
@@ -513,41 +382,13 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                 currentLeg = lastSnapshot.previousLeg,
                 currentSet = lastSnapshot.previousSet,
                 legStarterIndex = lastSnapshot.previousLegStarterIndex,
-                lastLegNotice = lastSnapshot.previousLastLegNotice,
                 isMatchOver = false,
                 winner = null,
                 currentDarts = previousDarts,
-                keypadBuffer = "",
-                claimedDoubleIn = false,
-                claimedDoubleOut = false,
                 isBustFeedback = false,
                 turnHistory = match.turnHistory.dropLast(1)
             )
         }
-    }
-
-    fun clearCurrentDarts() {
-        _activeMatch.update { match ->
-            match?.copy(currentDarts = emptyList())
-        }
-    }
-
-    fun submitDartsTurn() {
-        val match = _activeMatch.value ?: return
-        if (match.isMatchOver || match.pendingSubWin != null) return
-        val currentP = match.currentPlayer ?: return
-        if (match.currentDarts.isEmpty()) return
-
-        val turnScore = DartsEngine.evaluateTurn(
-            playerId = currentP.player.id,
-            turnIndex = currentP.turns.size + 1,
-            scoreBefore = currentP.currentScore,
-            darts = match.currentDarts,
-            rules = match.rules,
-            hasDoubleIn = currentP.hasDoubleInAchieved
-        )
-
-        applyTurnScore(turnScore)
     }
 
     private fun applyTurnScore(turnScore: TurnScore) {
@@ -561,7 +402,6 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             previousLeg = match.currentLeg,
             previousSet = match.currentSet,
             previousLegStarterIndex = match.legStarterIndex,
-            previousLastLegNotice = match.lastLegNotice,
             turnScore = turnScore
         )
 
@@ -573,10 +413,8 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             val legsToWinSet = match.rules.legsToWinSet.coerceAtLeast(1)
 
             if (newLegsWon >= legsToWinSet) {
-                // Set Won!
                 val newSetsWon = currentP.setsWon + 1
                 if (newSetsWon >= setsToWin) {
-                    // Whole Match Won! Defer committing DB/tournament until user confirms dialog (allows Back revert)
                     val finalWinnerP = currentP.copy(
                         currentScore = 0,
                         hasDoubleInAchieved = currentP.hasDoubleInAchieved || turnScore.doubleInUnlockedThisTurn,
@@ -593,16 +431,11 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                         isMatchOver = true,
                         winner = finalWinnerP,
                         pendingSubWin = null,
-                        lastLegNotice = null,
                         currentDarts = emptyList(),
-                        keypadBuffer = "",
-                        claimedDoubleIn = false,
-                        claimedDoubleOut = false,
                         isBustFeedback = false,
                         turnHistory = match.turnHistory + snapshot
                     )
                 } else {
-                    // Set Won (not whole match yet) -> show green popup before advancing
                     val updatedWinnerP = currentP.copy(
                         currentScore = 0,
                         hasDoubleInAchieved = currentP.hasDoubleInAchieved || turnScore.doubleInUnlockedThisTurn,
@@ -624,21 +457,16 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                             setsWon = newSetsWon,
                             legsWon = newLegsWon,
                             nextLeg = 1,
-                            nextSet = match.currentSet + 1,
-                            noticeText = "Set ${match.currentSet} won by ${currentP.player.name}!"
+                            nextSet = match.currentSet + 1
                         ),
                         isMatchOver = false,
                         winner = null,
                         currentDarts = emptyList(),
-                        keypadBuffer = "",
-                        claimedDoubleIn = false,
-                        claimedDoubleOut = false,
                         isBustFeedback = false,
                         turnHistory = match.turnHistory + snapshot
                     )
                 }
             } else {
-                // Leg Won (not whole set/match yet) -> show green popup before advancing
                 val updatedWinnerP = currentP.copy(
                     currentScore = 0,
                     hasDoubleInAchieved = currentP.hasDoubleInAchieved || turnScore.doubleInUnlockedThisTurn,
@@ -659,15 +487,11 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                         setsWon = currentP.setsWon,
                         legsWon = newLegsWon,
                         nextLeg = match.currentLeg + 1,
-                        nextSet = match.currentSet,
-                        noticeText = "Leg ${match.currentLeg} won by ${currentP.player.name}!"
+                        nextSet = match.currentSet
                     ),
                     isMatchOver = false,
                     winner = null,
                     currentDarts = emptyList(),
-                    keypadBuffer = "",
-                    claimedDoubleIn = false,
-                    claimedDoubleOut = false,
                     isBustFeedback = false,
                     turnHistory = match.turnHistory + snapshot
                 )
@@ -690,9 +514,6 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
                 winner = null,
                 pendingSubWin = null,
                 currentDarts = emptyList(),
-                keypadBuffer = "",
-                claimedDoubleIn = false,
-                claimedDoubleOut = false,
                 isBustFeedback = turnScore.isBust,
                 turnHistory = match.turnHistory + snapshot
             )
@@ -721,14 +542,10 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             currentLeg = subWin.nextLeg,
             legStarterIndex = nextLegStarter,
             currentPlayerIndex = nextLegStarter,
-            lastLegNotice = null,
             pendingSubWin = null,
             isMatchOver = false,
             winner = null,
             currentDarts = emptyList(),
-            keypadBuffer = "",
-            claimedDoubleIn = false,
-            claimedDoubleOut = false,
             isBustFeedback = false
         )
     }
@@ -744,14 +561,10 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
             currentLeg = lastSnapshot.previousLeg,
             currentSet = lastSnapshot.previousSet,
             legStarterIndex = lastSnapshot.previousLegStarterIndex,
-            lastLegNotice = lastSnapshot.previousLastLegNotice,
             isMatchOver = false,
             winner = null,
             pendingSubWin = null,
             currentDarts = previousDarts,
-            keypadBuffer = "",
-            claimedDoubleIn = false,
-            claimedDoubleOut = false,
             isBustFeedback = false,
             turnHistory = match.turnHistory.dropLast(1)
         )
@@ -793,43 +606,6 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
         _activeMatch.value = null
     }
 
-    fun confirmMatchWinAndNextTournamentMatch() {
-        val match = _activeMatch.value ?: return
-        commitCompletedMatchResult(match)
-        val nextMatchId = _tournamentState.value?.currentMatchId
-        if (nextMatchId != null) {
-            launchTournamentMatch(nextMatchId)
-        } else {
-            _activeMatch.value = null
-        }
-    }
-
-    fun undoLastTurn() {
-        _activeMatch.update { match ->
-            match?.let {
-                if (it.turnHistory.isEmpty()) return@let it
-                val lastSnapshot = it.turnHistory.last()
-                it.copy(
-                    players = lastSnapshot.previousPlayers,
-                    currentPlayerIndex = lastSnapshot.previousCurrentPlayerIndex,
-                    currentLeg = lastSnapshot.previousLeg,
-                    currentSet = lastSnapshot.previousSet,
-                    legStarterIndex = lastSnapshot.previousLegStarterIndex,
-                    lastLegNotice = lastSnapshot.previousLastLegNotice,
-                    isMatchOver = false,
-                    winner = null,
-                    pendingSubWin = null,
-                    currentDarts = emptyList(),
-                    keypadBuffer = "",
-                    claimedDoubleIn = false,
-                    claimedDoubleOut = false,
-                    isBustFeedback = false,
-                    turnHistory = it.turnHistory.dropLast(1)
-                )
-            }
-        }
-    }
-
     fun exitMatch() {
         _activeMatch.value = null
     }
@@ -837,10 +613,9 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
     // ==================== TOURNAMENT MANAGEMENT ====================
 
     fun startTournament(type: TournamentType, rules: GameRules, playerIds: List<Long>) {
-        val playersList = allPlayers.value.filter { playerIds.contains(it.id) }
-        if (playersList.size < 2) return
-
-        val sortedPlayers = playerIds.mapNotNull { id -> playersList.find { it.id == id } }
+        val playersById = allPlayers.value.associateBy { it.id }
+        val sortedPlayers = playerIds.mapNotNull { playersById[it] }
+        if (sortedPlayers.size < 2) return
 
         val matches = when (type) {
             TournamentType.ROUND_ROBIN -> DartsEngine.generateRoundRobinMatches(sortedPlayers)

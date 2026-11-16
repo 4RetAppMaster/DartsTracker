@@ -7,20 +7,19 @@ class PlayerRepository(private val playerDao: PlayerDao) {
 
     suspend fun getAllPlayersList(): List<Player> = playerDao.getAllPlayersList()
 
-    suspend fun getPlayerById(id: Long): Player? = playerDao.getPlayerById(id)
-
     suspend fun insertPlayer(player: Player): Long = playerDao.insertPlayer(player)
 
     suspend fun updatePlayer(player: Player) = playerDao.updatePlayer(player)
 
     suspend fun deletePlayer(player: Player) = playerDao.deletePlayer(player)
 
-    suspend fun recordMatchResult(winnerId: Long, loserIds: List<Long>) {
-        playerDao.recordWin(winnerId)
-        for (loserId in loserIds) {
-            playerDao.recordLoss(loserId)
-        }
-    }
+    suspend fun replaceAllPlayers(players: List<Player>) = playerDao.replaceAllPlayers(players)
+
+    suspend fun mergeImportedPlayers(toInsert: List<Player>, toUpdate: List<Player>) =
+        playerDao.mergeImportedPlayers(toInsert, toUpdate)
+
+    suspend fun recordMatchResult(winnerId: Long, loserIds: List<Long>) =
+        playerDao.recordMatchResult(winnerId, loserIds)
 
     suspend fun resetPlayerStats(id: Long) = playerDao.resetStats(id)
 }

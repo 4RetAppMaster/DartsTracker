@@ -44,8 +44,8 @@ class DartsViewModelTest {
     }
 
     @Test
-    fun versionName_isIncrementedTo1_5() {
-        assertEquals("1.5", BuildConfig.VERSION_NAME)
+    fun versionName_isIncrementedTo1_7() {
+        assertEquals("1.7", BuildConfig.VERSION_NAME)
     }
 
     @Test
@@ -116,7 +116,6 @@ class DartsViewModelTest {
         val wonMatch = viewModel.activeMatch.value
         assertNotNull(wonMatch)
         assertTrue(wonMatch!!.isMatchOver)
-        assertNull(wonMatch.lastLegNotice)
 
         // Confirming win exits back to tournament match selector (activeMatch == null)
         viewModel.confirmMatchWinAndExit()

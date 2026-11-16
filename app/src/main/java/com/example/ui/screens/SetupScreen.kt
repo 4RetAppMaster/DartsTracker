@@ -2,21 +2,20 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,12 +38,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.Player
 import com.example.model.GameRules
 import com.example.model.GameType
 import com.example.model.TournamentType
 import com.example.ui.theme.*
 import com.example.viewmodel.DartsViewModel
+
+private val GAME_TYPES = listOf(GameType.GAME_301, GameType.GAME_401, GameType.GAME_501)
 
 @Composable
 fun TwoLineDragHandle(
@@ -82,13 +84,13 @@ fun SetupScreen(
     viewModel: DartsViewModel,
     modifier: Modifier = Modifier
 ) {
-    val players by viewModel.allPlayers.collectAsState()
-    val selectedGameType by viewModel.selectedGameType.collectAsState()
-    val doubleIn by viewModel.doubleIn.collectAsState()
-    val doubleOut by viewModel.doubleOut.collectAsState()
-    val setsToWin by viewModel.setsToWin.collectAsState()
-    val legsToWinSet by viewModel.legsToWinSet.collectAsState()
-    val selectedPlayerIds by viewModel.selectedPlayerIds.collectAsState()
+    val players by viewModel.allPlayers.collectAsStateWithLifecycle()
+    val selectedGameType by viewModel.selectedGameType.collectAsStateWithLifecycle()
+    val doubleIn by viewModel.doubleIn.collectAsStateWithLifecycle()
+    val doubleOut by viewModel.doubleOut.collectAsStateWithLifecycle()
+    val setsToWin by viewModel.setsToWin.collectAsStateWithLifecycle()
+    val legsToWinSet by viewModel.legsToWinSet.collectAsStateWithLifecycle()
+    val selectedPlayerIds by viewModel.selectedPlayerIds.collectAsStateWithLifecycle()
 
     var showTournamentDialog by remember { mutableStateOf(false) }
     var showPlayerSelectPopup by remember { mutableStateOf(false) }
@@ -109,9 +111,10 @@ fun SetupScreen(
     val density = LocalDensity.current
     val itemSpacingPx = with(density) { 8.dp.toPx() }
 
-    // Map selected IDs to actual Player objects in selected order
+    // Map selected IDs to actual Player objects in selected order (O(N + M))
     val selectedPlayersList = remember(players, selectedPlayerIds) {
-        selectedPlayerIds.mapNotNull { id -> players.find { it.id == id } }
+        val playersById = players.associateBy { it.id }
+        selectedPlayerIds.mapNotNull { playersById[it] }
     }
 
     Column(
@@ -147,7 +150,7 @@ fun SetupScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(GameType.GAME_301, GameType.GAME_401, GameType.GAME_501).forEach { type ->
+                        GAME_TYPES.forEach { type ->
                             val isSelected = (selectedGameType == type)
                             Surface(
                                 modifier = Modifier
@@ -188,7 +191,7 @@ fun SetupScreen(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(54.dp)
                                 .clip(RoundedCornerShape(14.dp)),
                             shape = RoundedCornerShape(14.dp),
                             color = AppSurface,
@@ -199,46 +202,42 @@ fun SetupScreen(
                                     .fillMaxSize()
                                     .padding(horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 IconButton(
                                     onClick = { viewModel.setSetsToWin((setsToWin - 1).coerceAtLeast(1)) },
                                     enabled = setsToWin > 1,
                                     modifier = Modifier
-                                        .size(30.dp)
+                                        .size(48.dp)
                                         .testTag("stepper_decrease_sets")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.RemoveCircleOutline,
+                                        imageVector = AppIcons.RemoveCircleOutline,
                                         contentDescription = "Decrease Sets",
                                         tint = if (setsToWin > 1) BrandPrimary else TextMuted.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
-
                                 Text(
                                     text = "$setsToWin ${if (setsToWin == 1) "Set" else "Sets"}",
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = BrandPrimary
                                 )
-
-                                Spacer(modifier = Modifier.width(6.dp))
 
                                 IconButton(
                                     onClick = { viewModel.setSetsToWin((setsToWin + 1).coerceAtMost(10)) },
                                     enabled = setsToWin < 10,
                                     modifier = Modifier
-                                        .size(30.dp)
+                                        .size(48.dp)
                                         .testTag("stepper_increase_sets")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.AddCircleOutline,
+                                        imageVector = AppIcons.AddCircleOutline,
                                         contentDescription = "Increase Sets",
                                         tint = if (setsToWin < 10) BrandPrimary else TextMuted.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -248,7 +247,7 @@ fun SetupScreen(
                         Surface(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(54.dp)
                                 .clip(RoundedCornerShape(14.dp)),
                             shape = RoundedCornerShape(14.dp),
                             color = AppSurface,
@@ -259,46 +258,42 @@ fun SetupScreen(
                                     .fillMaxSize()
                                     .padding(horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 IconButton(
                                     onClick = { viewModel.setLegsToWinSet((legsToWinSet - 1).coerceAtLeast(1)) },
                                     enabled = legsToWinSet > 1,
                                     modifier = Modifier
-                                        .size(30.dp)
+                                        .size(48.dp)
                                         .testTag("stepper_decrease_legs")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.RemoveCircleOutline,
+                                        imageVector = AppIcons.RemoveCircleOutline,
                                         contentDescription = "Decrease Legs",
                                         tint = if (legsToWinSet > 1) BrandPrimary else TextMuted.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
-
                                 Text(
                                     text = "$legsToWinSet ${if (legsToWinSet == 1) "Leg" else "Legs"}",
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = BrandPrimary
                                 )
-
-                                Spacer(modifier = Modifier.width(6.dp))
 
                                 IconButton(
                                     onClick = { viewModel.setLegsToWinSet((legsToWinSet + 1).coerceAtMost(10)) },
                                     enabled = legsToWinSet < 10,
                                     modifier = Modifier
-                                        .size(30.dp)
+                                        .size(48.dp)
                                         .testTag("stepper_increase_legs")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.AddCircleOutline,
+                                        imageVector = AppIcons.AddCircleOutline,
                                         contentDescription = "Increase Legs",
                                         tint = if (legsToWinSet < 10) BrandPrimary else TextMuted.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -398,7 +393,7 @@ fun SetupScreen(
                                 .testTag("setup_add_player_popup_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PersonAdd,
+                                imageVector = AppIcons.PersonAdd,
                                 contentDescription = "Add / Choose Players",
                                 tint = BrandPrimary,
                                 modifier = Modifier.size(26.dp)
@@ -444,7 +439,7 @@ fun SetupScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.PersonAdd,
+                                        imageVector = AppIcons.PersonAdd,
                                         contentDescription = null,
                                         tint = BrandPrimary,
                                         modifier = Modifier.size(30.dp)
@@ -467,7 +462,6 @@ fun SetupScreen(
                     }
                 }
             } else {
-                @OptIn(ExperimentalFoundationApi::class)
                 itemsIndexed(selectedPlayersList, key = { _, item -> item.id }) { _, player ->
                     val isDragging = (draggingPlayerId == player.id)
 
@@ -478,7 +472,7 @@ fun SetupScreen(
                                 playerRowHeightPx = size.height.toFloat()
                             }
                         }
-                        .then(if (!isDragging) Modifier.animateItemPlacement() else Modifier)
+                        .then(if (!isDragging) Modifier.animateItem() else Modifier)
                         .zIndex(if (isDragging) 10f else 1f)
                         .graphicsLayer {
                             translationY = if (isDragging) dragOffsetY else 0f
@@ -696,7 +690,7 @@ fun SetupScreen(
                     )
                 ) {
                     Icon(
-                        imageVector = Icons.Default.EmojiEvents,
+                        imageVector = AppIcons.EmojiEvents,
                         contentDescription = null,
                         tint = if (canStartTournament) BrandSecondary else TextMuted,
                         modifier = Modifier.size(18.dp)
@@ -734,7 +728,7 @@ fun SetupScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.People, contentDescription = null, tint = BrandPrimary)
+                        Icon(imageVector = AppIcons.People, contentDescription = null, tint = BrandPrimary)
                         Text("Select Players", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
 
@@ -743,7 +737,7 @@ fun SetupScreen(
                         modifier = Modifier.size(32.dp).testTag("popup_toggle_add_new_player")
                     ) {
                         Icon(
-                            imageVector = if (isAddingInline) Icons.Default.Close else Icons.Default.PersonAdd,
+                            imageVector = if (isAddingInline) Icons.Default.Close else AppIcons.PersonAdd,
                             contentDescription = "Create Player",
                             tint = BrandPrimary,
                             modifier = Modifier.size(20.dp)
@@ -917,7 +911,7 @@ fun SetupScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.EmojiEvents, contentDescription = null, tint = BrandSecondary)
+                    Icon(imageVector = AppIcons.EmojiEvents, contentDescription = null, tint = BrandSecondary)
                     Text("Tournament Format", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
             },

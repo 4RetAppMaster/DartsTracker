@@ -26,24 +26,10 @@ val BrandError = Color(0xFFFF6B6B)
 val BrandErrorContainer = Color(0xFF541A1A)
 val BrandOnErrorContainer = Color(0xFFFFDAD6)
 
-val BrandSlate = Color(0xFF8E99AC)
-
 // Text Colors
 val TextPrimary = Color(0xFFF1F4F9)
 val TextSecondary = Color(0xFFA2ABB8)
 val TextMuted = Color(0xFF6E7887)
-
-// Aliases for compatibility across components
-val DarkBg = AppBg
-val DarkSurface = AppSurface
-val DarkSurfaceElevated = AppSurfaceElevated
-val DarkBorder = AppBorder
-val CyanNeon = BrandPrimary
-val CyanNeonDark = Color(0xFF1E609A)
-val AmberGold = BrandSecondary
-val EmeraldHit = BrandSuccess
-val CrimsonBust = BrandError
-val VioletActive = Color(0xFF9E86E0)
 
 // Material 3 Color Schemes (Dark Theme)
 val md_theme_dark_primary = BrandPrimary

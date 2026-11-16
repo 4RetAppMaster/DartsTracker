@@ -12,8 +12,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,20 +28,32 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.engine.CheckoutCalculator
 import com.example.model.*
 import com.example.ui.components.ConfettiPopOverlay
 import com.example.ui.theme.*
 import com.example.viewmodel.ActiveMatchState
 import com.example.viewmodel.DartsViewModel
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val DART_NUMBER_ROWS = listOf(
+    listOf(1, 2, 3, 4, 5),
+    listOf(6, 7, 8, 9, 10),
+    listOf(11, 12, 13, 14, 15),
+    listOf(16, 17, 18, 19, 20),
+    listOf(0, 25, 50)
+)
+private val DartKeyShape = RoundedCornerShape(8.dp)
+private val KeyBorderDefault = BorderStroke(1.dp, AppBorder)
+private val SlotShape = RoundedCornerShape(4.dp)
+
 @Composable
 fun LiveScoringScreen(
     viewModel: DartsViewModel,
     modifier: Modifier = Modifier
 ) {
-    val activeMatch by viewModel.activeMatch.collectAsState()
+    val activeMatch by viewModel.activeMatch.collectAsStateWithLifecycle()
     val match = activeMatch ?: return
 
     var selectedMultiplier by remember(match.tournamentMatchId, match.currentSet, match.currentLeg) {
@@ -242,7 +254,7 @@ fun LiveScoringScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                (0..2).forEach { slotIndex ->
+                                for (slotIndex in 0..2) {
                                     val dart = if (isActive) {
                                         match.currentDarts.getOrNull(slotIndex)
                                     } else {
@@ -254,13 +266,13 @@ fun LiveScoringScreen(
                                         modifier = Modifier
                                             .width(34.dp)
                                             .height(20.dp),
-                                        shape = RoundedCornerShape(4.dp),
+                                        shape = SlotShape,
                                         color = when {
                                             dart != null -> BrandSuccessContainer.copy(alpha = 0.5f)
                                             isCurrentSlot -> BrandPrimary.copy(alpha = 0.15f)
                                             else -> AppSurfaceElevated
                                         },
-                                        border = androidx.compose.foundation.BorderStroke(
+                                        border = BorderStroke(
                                             1.dp,
                                             when {
                                                 dart != null -> BrandSuccess.copy(alpha = 0.6f)
@@ -301,7 +313,7 @@ fun LiveScoringScreen(
                             }
 
                             Surface(
-                                shape = RoundedCornerShape(4.dp),
+                                shape = SlotShape,
                                 color = if (isActive && match.currentDarts.isNotEmpty()) BrandPrimaryContainer else AppSurfaceElevated
                             ) {
                                 Text(
@@ -321,7 +333,7 @@ fun LiveScoringScreen(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                text = "Avg ${String.format("%.1f", pState.threeDartAverage)}",
+                                text = "Avg ${String.format(Locale.US, "%.1f", pState.threeDartAverage)}",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (isActive) BrandPrimary else TextSecondary,
@@ -466,7 +478,7 @@ fun LiveScoringScreen(
                         ) {
                             Text("3-Dart Average", color = TextSecondary, fontSize = 13.sp)
                             Text(
-                                text = String.format("%.1f", winner.threeDartAverage),
+                                text = String.format(Locale.US, "%.1f", winner.threeDartAverage),
                                 color = if (isIntermediateTournamentMatch) BrandSuccess else BrandPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
@@ -564,7 +576,7 @@ private fun WinPopupWithConfetti(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (isGreenIntermediateWin) Icons.Default.CheckCircle else Icons.Default.EmojiEvents,
+                                imageVector = if (isGreenIntermediateWin) Icons.Default.CheckCircle else AppIcons.EmojiEvents,
                                 contentDescription = null,
                                 tint = accentColor,
                                 modifier = Modifier.size(36.dp)
@@ -611,7 +623,7 @@ private fun WinPopupWithConfetti(
                             )
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                imageVector = AppIcons.Undo,
                                 contentDescription = "Revert",
                                 modifier = Modifier.size(18.dp)
                             )
@@ -728,14 +740,6 @@ private fun DartByDartInterface(
         }
 
         // Keypad Section (Left: 5 columns of numbers; Right: Double, Triple, Erase)
-        val numRows = listOf(
-            listOf(1, 2, 3, 4, 5),
-            listOf(6, 7, 8, 9, 10),
-            listOf(11, 12, 13, 14, 15),
-            listOf(16, 17, 18, 19, 20),
-            listOf(0, 25, 50)
-        )
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -745,27 +749,26 @@ private fun DartByDartInterface(
                 modifier = Modifier.weight(4.2f),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                numRows.forEachIndexed { rowIndex, rowNums ->
+                DART_NUMBER_ROWS.forEachIndexed { rowIndex, rowNums ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         if (rowIndex == 4) {
                             // Row with 0, 25, 50
-                            // 0 (Miss)
                             Surface(
                                 modifier = Modifier
                                     .weight(1.5f)
                                     .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(DartKeyShape)
                                     .clickable {
                                         viewModel.addDartThrow(DartThrow(0, Multiplier.MISS))
                                         onSelectMultiplier(Multiplier.SINGLE)
                                     }
                                     .testTag("dart_num_0"),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = DartKeyShape,
                                 color = AppSurface,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                                border = KeyBorderDefault
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -776,21 +779,20 @@ private fun DartByDartInterface(
                                     )
                                 }
                             }
-                            // 25 (Bull)
                             Surface(
                                 modifier = Modifier
                                     .weight(1.75f)
                                     .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(DartKeyShape)
                                     .clickable {
                                         val isDouble = selectedMultiplier == Multiplier.DOUBLE
                                         viewModel.addDartThrow(DartThrow(25, if (isDouble) Multiplier.DOUBLE else Multiplier.SINGLE))
                                         onSelectMultiplier(Multiplier.SINGLE)
                                     }
                                     .testTag("dart_num_25"),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = DartKeyShape,
                                 color = AppSurface,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                                border = KeyBorderDefault
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -801,20 +803,19 @@ private fun DartByDartInterface(
                                     )
                                 }
                             }
-                            // 50 (D-Bull)
                             Surface(
                                 modifier = Modifier
                                     .weight(1.75f)
                                     .height(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(DartKeyShape)
                                     .clickable {
                                         viewModel.addDartThrow(DartThrow(25, Multiplier.DOUBLE))
                                         onSelectMultiplier(Multiplier.SINGLE)
                                     }
                                     .testTag("dart_num_50"),
-                                shape = RoundedCornerShape(8.dp),
+                                shape = DartKeyShape,
                                 color = AppSurface,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                                border = KeyBorderDefault
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -832,15 +833,15 @@ private fun DartByDartInterface(
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(44.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(DartKeyShape)
                                         .clickable {
                                             viewModel.addDartThrow(DartThrow(num, selectedMultiplier))
                                             onSelectMultiplier(Multiplier.SINGLE)
                                         }
                                         .testTag("dart_num_$num"),
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = DartKeyShape,
                                     color = AppSurface,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                                    border = KeyBorderDefault
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
@@ -861,23 +862,22 @@ private fun DartByDartInterface(
             Column(
                 modifier = Modifier
                     .weight(1.35f)
-                    .height(240.dp), // Matches the 5 rows of numbers
+                    .height(240.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                // "Double" Toggle Button (renamed from 2x)
                 val isDouble = (selectedMultiplier == Multiplier.DOUBLE)
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(DartKeyShape)
                         .clickable {
                             onSelectMultiplier(if (isDouble) Multiplier.SINGLE else Multiplier.DOUBLE)
                         }
                         .testTag("multiplier_DOUBLE"),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = DartKeyShape,
                     color = if (isDouble) BrandSecondary else AppSurface,
-                    border = androidx.compose.foundation.BorderStroke(
+                    border = BorderStroke(
                         if (isDouble) 2.dp else 1.dp,
                         if (isDouble) BrandSecondary else AppBorder
                     )
@@ -892,20 +892,19 @@ private fun DartByDartInterface(
                     }
                 }
 
-                // "Triple" Toggle Button (renamed from 3x)
                 val isTriple = (selectedMultiplier == Multiplier.TRIPLE)
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(DartKeyShape)
                         .clickable {
                             onSelectMultiplier(if (isTriple) Multiplier.SINGLE else Multiplier.TRIPLE)
                         }
                         .testTag("multiplier_TRIPLE"),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = DartKeyShape,
                     color = if (isTriple) BrandPrimary else AppSurface,
-                    border = androidx.compose.foundation.BorderStroke(
+                    border = BorderStroke(
                         if (isTriple) 2.dp else 1.dp,
                         if (isTriple) BrandPrimary else AppBorder
                     )
@@ -920,21 +919,20 @@ private fun DartByDartInterface(
                     }
                 }
 
-                // Delete / Erase Button (Red background, white icon - deletes dart or goes to previous player)
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(DartKeyShape)
                         .clickable { viewModel.removeLastDartThrow() }
                         .testTag("dart_erase_button"),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = DartKeyShape,
                     color = BrandError,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, BrandError)
+                    border = BorderStroke(1.dp, BrandError)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.Backspace,
+                            imageVector = AppIcons.Backspace,
                             contentDescription = "Erase Dart",
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)

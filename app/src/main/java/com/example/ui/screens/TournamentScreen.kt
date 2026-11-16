@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,11 +22,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.engine.DartsEngine
 import com.example.model.TournamentMatch
 import com.example.model.TournamentType
 import com.example.ui.components.ConfettiPopOverlay
-import com.example.ui.components.PlayerAvatar
 import com.example.ui.theme.*
 import com.example.viewmodel.DartsViewModel
 
@@ -33,7 +35,7 @@ fun TournamentScreen(
     viewModel: DartsViewModel,
     modifier: Modifier = Modifier
 ) {
-    val tournament by viewModel.tournamentState.collectAsState()
+    val tournament by viewModel.tournamentState.collectAsStateWithLifecycle()
     val t = tournament ?: return
 
     var showExitDialog by remember { mutableStateOf(false) }
@@ -41,6 +43,9 @@ fun TournamentScreen(
 
     val allRounds = remember(t.matches) {
         t.matches.map { it.round }.distinct().sorted()
+    }
+    val roundMatches = remember(t.matches, selectedRoundTab) {
+        t.matches.filter { it.round == selectedRoundTab }
     }
 
     Scaffold(
@@ -81,7 +86,7 @@ fun TournamentScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Default.EmojiEvents,
+                                        imageVector = AppIcons.EmojiEvents,
                                         contentDescription = null,
                                         tint = BrandSecondary,
                                         modifier = Modifier.size(22.dp)
@@ -139,7 +144,7 @@ fun TournamentScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.EmojiEvents,
+                                    imageVector = AppIcons.EmojiEvents,
                                     contentDescription = null,
                                     tint = BrandSecondary,
                                     modifier = Modifier.size(48.dp)
@@ -294,7 +299,7 @@ fun TournamentScreen(
                             modifier = Modifier.testTag("mix_players_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Shuffle,
+                                imageVector = AppIcons.Shuffle,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -344,7 +349,6 @@ fun TournamentScreen(
                     }
                 }
 
-                val roundMatches = t.matches.filter { it.round == selectedRoundTab }
                 items(roundMatches, key = { it.id }) { match ->
                     MatchCard(
                         match = match,

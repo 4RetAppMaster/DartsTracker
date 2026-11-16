@@ -13,7 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,9 +29,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.Player
 import com.example.ui.theme.*
 import com.example.viewmodel.DartsViewModel
@@ -40,7 +44,7 @@ fun PlayersScreen(
     viewModel: DartsViewModel,
     modifier: Modifier = Modifier
 ) {
-    val players by viewModel.allPlayers.collectAsState()
+    val players by viewModel.allPlayers.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -112,7 +116,7 @@ fun PlayersScreen(
                     modifier = Modifier.testTag("add_player_header_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PersonAdd,
+                        imageVector = AppIcons.PersonAdd,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
@@ -176,7 +180,7 @@ fun PlayersScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PersonSearch,
+                            imageVector = AppIcons.PersonSearch,
                             contentDescription = null,
                             tint = TextMuted,
                             modifier = Modifier.size(36.dp)
@@ -229,7 +233,7 @@ fun PlayersScreen(
                 contentPadding = PaddingValues(vertical = 10.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.SyncAlt,
+                    imageVector = AppIcons.SyncAlt,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
@@ -444,7 +448,7 @@ private fun PlayerBackupDialog(
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
 
-    val allPlayers by viewModel.allPlayers.collectAsState()
+    val allPlayers by viewModel.allPlayers.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Export, 1 = Import
     var exportedJson by remember { mutableStateOf("") }
     var copyNotice by remember { mutableStateOf(false) }
@@ -460,7 +464,7 @@ private fun PlayerBackupDialog(
     var isImporting by remember { mutableStateOf(false) }
 
     LaunchedEffect(allPlayers) {
-        exportedJson = viewModel.exportPlayersJson()
+        exportedJson = viewModel.exportPlayersJsonAsync(allPlayers)
     }
 
     val saveFileLauncher = rememberLauncherForActivityResult(
@@ -468,7 +472,7 @@ private fun PlayerBackupDialog(
     ) { uri ->
         if (uri != null) {
             coroutineScope.launch {
-                val jsonToWrite = viewModel.exportPlayersJson()
+                val jsonToWrite = viewModel.exportPlayersJsonAsync()
                 val saveRes = withContext(Dispatchers.IO) {
                     runCatching {
                         val stream = context.contentResolver.openOutputStream(uri, "wt")
@@ -535,7 +539,7 @@ private fun PlayerBackupDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.SyncAlt,
+                        imageVector = AppIcons.SyncAlt,
                         contentDescription = null,
                         tint = BrandPrimary,
                         modifier = Modifier.size(22.dp)
@@ -634,7 +638,7 @@ private fun PlayerBackupDialog(
                             contentColor = BrandOnPrimary
                         )
                     ) {
-                        Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = AppIcons.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Save to File (.json)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
@@ -660,7 +664,7 @@ private fun PlayerBackupDialog(
                             ),
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(imageVector = AppIcons.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(if (copyNotice) "Copied!" else "Copy JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -761,7 +765,7 @@ private fun PlayerBackupDialog(
                             contentColor = BrandPrimary
                         )
                     ) {
-                        Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Choose File (.json)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
@@ -817,7 +821,7 @@ private fun PlayerBackupDialog(
                             },
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp), tint = BrandPrimary)
+                            Icon(imageVector = AppIcons.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp), tint = BrandPrimary)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Paste Clipboard", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
                         }
@@ -907,7 +911,7 @@ private fun PlayerBackupDialog(
                                     isImportSuccess = true
                                     importStatusMessage = "Successfully imported $count player(s)!"
                                     importJsonText = ""
-                                    exportedJson = viewModel.exportPlayersJson()
+                                    exportedJson = viewModel.exportPlayersJsonAsync()
                                 } else {
                                     isImportSuccess = false
                                     importStatusMessage = "Import failed: ${res.exceptionOrNull()?.message}"
@@ -930,7 +934,7 @@ private fun PlayerBackupDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Importing...", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         } else {
-                            Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(imageVector = AppIcons.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Import", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
@@ -1015,7 +1019,7 @@ private fun PlayerCompactCard(
                         .testTag("player_reset_${player.id}")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.RestartAlt,
+                        imageVector = AppIcons.RestartAlt,
                         contentDescription = "Reset Stats",
                         tint = TextSecondary,
                         modifier = Modifier.size(16.dp)
@@ -1028,7 +1032,7 @@ private fun PlayerCompactCard(
                         .testTag("player_delete_${player.id}")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.DeleteOutline,
+                        imageVector = AppIcons.DeleteOutline,
                         contentDescription = "Delete Player",
                         tint = BrandError,
                         modifier = Modifier.size(16.dp)

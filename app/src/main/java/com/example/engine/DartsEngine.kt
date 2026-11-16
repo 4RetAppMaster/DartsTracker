@@ -26,9 +26,7 @@ object DartsEngine {
         var isWinning = false
         var totalPointsScored = 0
 
-        for (i in darts.indices) {
-            val dart = darts[i]
-            val isLastDartOfTurn = (i == darts.lastIndex)
+        for (dart in darts) {
 
             if (rules.doubleIn && !doubleInAchieved) {
                 if (dart.isDouble && dart.points > 0) {
@@ -107,125 +105,6 @@ object DartsEngine {
                 isWinningTurn = isWinning
             )
         }
-    }
-
-    /**
-     * Evaluates a turn from direct point total input.
-     */
-    fun evaluateTurnPoints(
-        playerId: Long,
-        turnIndex: Int,
-        scoreBefore: Int,
-        enteredPoints: Int,
-        rules: GameRules,
-        hasDoubleIn: Boolean,
-        claimedDoubleIn: Boolean = false,
-        claimedDoubleOut: Boolean = false,
-        dartsCountUsed: Int = 3
-    ): TurnScore {
-        // Validation check for 3-dart maximum
-        if (enteredPoints > 180 || enteredPoints < 0) {
-            return TurnScore(
-                playerId = playerId,
-                turnIndex = turnIndex,
-                darts = List(dartsCountUsed) { DartThrow(0, Multiplier.MISS) },
-                totalPoints = 0,
-                scoreBefore = scoreBefore,
-                scoreAfter = scoreBefore,
-                isBust = true,
-                doubleInUnlockedThisTurn = false,
-                isWinningTurn = false
-            )
-        }
-
-        var doubleInAchieved = hasDoubleIn
-        var doubleInUnlockedThisTurn = false
-
-        if (rules.doubleIn && !doubleInAchieved) {
-            if (claimedDoubleIn && enteredPoints > 0) {
-                doubleInAchieved = true
-                doubleInUnlockedThisTurn = true
-            } else {
-                // Still not doubled in
-                return TurnScore(
-                    playerId = playerId,
-                    turnIndex = turnIndex,
-                    darts = List(dartsCountUsed) { DartThrow(0, Multiplier.MISS) },
-                    totalPoints = 0,
-                    scoreBefore = scoreBefore,
-                    scoreAfter = scoreBefore,
-                    isBust = false,
-                    doubleInUnlockedThisTurn = false,
-                    isWinningTurn = false
-                )
-            }
-        }
-
-        val remaining = scoreBefore - enteredPoints
-
-        val isBust: Boolean
-        val isWinning: Boolean
-        val finalScore: Int
-
-        if (rules.doubleOut) {
-            if (remaining < 0 || remaining == 1) {
-                isBust = true
-                isWinning = false
-                finalScore = scoreBefore
-            } else if (remaining == 0) {
-                if (claimedDoubleOut) {
-                    isBust = false
-                    isWinning = true
-                    finalScore = 0
-                } else {
-                    // Cannot finish 0 without double out
-                    isBust = true
-                    isWinning = false
-                    finalScore = scoreBefore
-                }
-            } else {
-                isBust = false
-                isWinning = false
-                finalScore = remaining
-            }
-        } else {
-            // Straight out
-            if (remaining < 0) {
-                isBust = true
-                isWinning = false
-                finalScore = scoreBefore
-            } else if (remaining == 0) {
-                isBust = false
-                isWinning = true
-                finalScore = 0
-            } else {
-                isBust = false
-                isWinning = false
-                finalScore = remaining
-            }
-        }
-
-        val mockDarts = when {
-            isBust -> List(dartsCountUsed) { DartThrow(0, Multiplier.MISS) }
-            enteredPoints == 180 -> listOf(
-                DartThrow(20, Multiplier.TRIPLE),
-                DartThrow(20, Multiplier.TRIPLE),
-                DartThrow(20, Multiplier.TRIPLE)
-            )
-            else -> listOf(DartThrow(enteredPoints, Multiplier.SINGLE))
-        }
-
-        return TurnScore(
-            playerId = playerId,
-            turnIndex = turnIndex,
-            darts = mockDarts,
-            totalPoints = if (isBust) 0 else enteredPoints,
-            scoreBefore = scoreBefore,
-            scoreAfter = finalScore,
-            isBust = isBust,
-            doubleInUnlockedThisTurn = doubleInUnlockedThisTurn,
-            isWinningTurn = isWinning
-        )
     }
 
     // ==================== TOURNAMENT GENERATION ====================
@@ -404,15 +283,34 @@ object DartsEngine {
     }
 
     /**
-     * Computes standings table for Round Robin.
+     * Computes standings table for Round Robin in a single pass.
      */
     fun calculateRoundRobinStandings(players: List<Player>, matches: List<TournamentMatch>): List<StandingRow> {
-        val rows = players.map { player ->
-            val playerMatches = matches.filter { it.isCompleted && !it.isBye && (it.player1Id == player.id || it.player2Id == player.id) }
-            val won = playerMatches.count { it.winnerId == player.id }
-            val played = playerMatches.size
+        // [played, won]
+        val statsByPlayer = HashMap<Long, IntArray>(players.size)
+        for (player in players) {
+            statsByPlayer[player.id] = IntArray(2)
+        }
+
+        for (m in matches) {
+            if (!m.isCompleted || m.isBye) continue
+            statsByPlayer[m.player1Id]?.let { stats ->
+                stats[0]++
+                if (m.winnerId == m.player1Id) stats[1]++
+            }
+            val p2 = m.player2Id ?: continue
+            statsByPlayer[p2]?.let { stats ->
+                stats[0]++
+                if (m.winnerId == p2) stats[1]++
+            }
+        }
+
+        return players.map { player ->
+            val stats = statsByPlayer[player.id]
+            val played = stats?.get(0) ?: 0
+            val won = stats?.get(1) ?: 0
             val lost = played - won
-            val points = won * 2 // 2 points per win
+            val points = won * 2
             val winRate = if (played > 0) ((won.toDouble() / played) * 100).toInt() else 0
             StandingRow(
                 player = player,
@@ -422,7 +320,10 @@ object DartsEngine {
                 points = points,
                 winRate = winRate
             )
-        }
-        return rows.sortedWith(compareByDescending<StandingRow> { it.points }.thenByDescending { it.won }.thenByDescending { it.winRate })
+        }.sortedWith(
+            compareByDescending<StandingRow> { it.points }
+                .thenByDescending { it.won }
+                .thenByDescending { it.winRate }
+        )
     }
 }

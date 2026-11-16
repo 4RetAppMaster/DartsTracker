@@ -9,7 +9,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +21,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
 import com.example.R
 import com.example.ui.theme.*
@@ -41,10 +43,10 @@ fun MainScreen(
     var currentTab by remember { mutableStateOf(MainTab.PLAY) }
     var showExitMatchDialog by remember { mutableStateOf(false) }
 
-    val activeMatch by viewModel.activeMatch.collectAsState()
-    val activeTournament by viewModel.tournamentState.collectAsState()
-    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
-    val updateUiState by viewModel.updateUiState.collectAsState()
+    val activeMatch by viewModel.activeMatch.collectAsStateWithLifecycle()
+    val activeTournament by viewModel.tournamentState.collectAsStateWithLifecycle()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
+    val updateUiState by viewModel.updateUiState.collectAsStateWithLifecycle()
 
     // Back handling: dismiss dialogs first if open
     BackHandler(enabled = showUpdateDialog) {
@@ -171,7 +173,7 @@ fun MainScreen(
                         onClick = { currentTab = MainTab.PLAY },
                         icon = {
                             Icon(
-                                imageVector = if (activeTournament != null) Icons.Default.EmojiEvents else Icons.Default.Adjust,
+                                imageVector = if (activeTournament != null) AppIcons.EmojiEvents else AppIcons.Adjust,
                                 contentDescription = "Play"
                             )
                         },
@@ -196,7 +198,7 @@ fun MainScreen(
                         selected = (currentTab == MainTab.PLAYERS),
                         onClick = { currentTab = MainTab.PLAYERS },
                         icon = {
-                            Icon(imageVector = Icons.Default.People, contentDescription = "Players")
+                            Icon(imageVector = AppIcons.People, contentDescription = "Players")
                         },
                         label = {
                             Text(
@@ -398,7 +400,7 @@ private fun AppVersionAndUpdateDialog(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.SystemUpdate,
+                                                imageVector = AppIcons.SystemUpdate,
                                                 contentDescription = null,
                                                 tint = BrandSuccess,
                                                 modifier = Modifier.size(18.dp)
@@ -478,7 +480,7 @@ private fun AppVersionAndUpdateDialog(
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.CloudOff,
+                                            imageVector = AppIcons.CloudOff,
                                             contentDescription = null,
                                             tint = BrandError,
                                             modifier = Modifier.size(20.dp)
