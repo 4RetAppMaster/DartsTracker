@@ -1,20 +1,31 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
+import com.example.R
 import com.example.ui.theme.*
+import com.example.util.UpdateCheckResult
 import com.example.viewmodel.DartsViewModel
+import com.example.viewmodel.UpdateUiState
 
 enum class MainTab {
     PLAY,
@@ -32,19 +43,24 @@ fun MainScreen(
 
     val activeMatch by viewModel.activeMatch.collectAsState()
     val activeTournament by viewModel.tournamentState.collectAsState()
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
+    val updateUiState by viewModel.updateUiState.collectAsState()
 
-    // Back handling: dismiss dialog first if open
-    BackHandler(enabled = showExitMatchDialog) {
+    // Back handling: dismiss dialogs first if open
+    BackHandler(enabled = showUpdateDialog) {
+        viewModel.dismissUpdateDialog()
+    }
+    BackHandler(enabled = showExitMatchDialog && !showUpdateDialog) {
         showExitMatchDialog = false
     }
 
     // If in active match, prompt exit match
-    BackHandler(enabled = activeMatch != null && !showExitMatchDialog) {
+    BackHandler(enabled = activeMatch != null && !showExitMatchDialog && !showUpdateDialog) {
         showExitMatchDialog = true
     }
 
     // If on Players tab, go back to Play tab
-    BackHandler(enabled = currentTab != MainTab.PLAY && activeMatch == null) {
+    BackHandler(enabled = currentTab != MainTab.PLAY && activeMatch == null && !showUpdateDialog) {
         currentTab = MainTab.PLAY
     }
 
@@ -71,19 +87,23 @@ fun MainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            // Square shape with rounded corners containing a simple white dart icon
+                            // Blue rounded-square logo icon; tap to check version & GitHub updates
                             Surface(
-                                modifier = Modifier.size(40.dp),
+                                onClick = { viewModel.checkForUpdates(userInitiated = true) },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("darts_logo_button"),
                                 shape = RoundedCornerShape(12.dp),
                                 color = BrandPrimary,
                                 shadowElevation = 2.dp
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_dart_simple),
-                                        contentDescription = "Dart Icon",
+                                        painter = painterResource(id = R.drawable.ic_dart_logo),
+                                        contentDescription = "DartsTracker Logo - Tap to check version",
                                         tint = BrandOnPrimary,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
@@ -258,4 +278,288 @@ fun MainScreen(
             }
         )
     }
+
+    if (showUpdateDialog) {
+        AppVersionAndUpdateDialog(
+            updateUiState = updateUiState,
+            onRetry = { viewModel.checkForUpdates(userInitiated = true) },
+            onDismiss = { viewModel.dismissUpdateDialog() }
+        )
+    }
+}
+
+@Composable
+private fun AppVersionAndUpdateDialog(
+    updateUiState: UpdateUiState,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val currentVerLabel = "Ver ${BuildConfig.VERSION_NAME}"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AppSurface,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = BrandPrimary
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_dart_logo),
+                            contentDescription = null,
+                            tint = BrandOnPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "DartsTracker",
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 18.sp
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = BrandPrimaryContainer,
+                        border = BorderStroke(1.dp, BrandPrimary.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = currentVerLabel,
+                            color = BrandOnPrimaryContainer,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .testTag("update_dialog_version_label")
+                        )
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                when (updateUiState) {
+                    is UpdateUiState.Idle,
+                    is UpdateUiState.Checking -> {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = AppSurfaceElevated,
+                            border = BorderStroke(1.dp, AppBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = BrandPrimary,
+                                    strokeWidth = 2.5.dp
+                                )
+                                Text(
+                                    text = "Checking GitHub for new version...",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    is UpdateUiState.Result -> {
+                        when (val result = updateUiState.checkResult) {
+                            is UpdateCheckResult.UpdateAvailable -> {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = BrandSuccessContainer.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, BrandSuccess)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.SystemUpdate,
+                                                contentDescription = null,
+                                                tint = BrandSuccess,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "New Version Available: Ver ${result.latestVersion}",
+                                                color = BrandSuccess,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                        Text(
+                                            text = "Installed: $currentVerLabel  •  Latest tag: ${result.tagName}",
+                                            color = TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                        result.releaseNotes?.let { notes ->
+                                            Text(
+                                                text = notes.take(300),
+                                                color = TextPrimary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            is UpdateCheckResult.UpToDate -> {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = AppSurfaceElevated,
+                                    border = BorderStroke(1.dp, AppBorder)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = BrandSuccess,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(
+                                                text = "You are up to date ($currentVerLabel)",
+                                                color = TextPrimary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = if (result.latestVersion != null) {
+                                                    "Latest release: Ver ${result.latestVersion}"
+                                                } else {
+                                                    "You have the latest available version."
+                                                },
+                                                color = TextSecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            is UpdateCheckResult.Error -> {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = BrandErrorContainer.copy(alpha = 0.45f),
+                                    border = BorderStroke(1.dp, BrandError)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CloudOff,
+                                            contentDescription = null,
+                                            tint = BrandError,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(
+                                                text = "Update check failed ($currentVerLabel)",
+                                                color = BrandError,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = result.message,
+                                                color = TextSecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            val updateResult = (updateUiState as? UpdateUiState.Result)?.checkResult
+            when (updateResult) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateResult.releaseUrl))
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = BrandOnPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("update_download_button")
+                    ) {
+                        Text("Download Update", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                is UpdateCheckResult.Error -> {
+                    Button(
+                        onClick = onRetry,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = BrandOnPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("update_retry_button")
+                    ) {
+                        Text("Retry", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                else -> {
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = BrandOnPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("update_ok_button")
+                    ) {
+                        Text("OK", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            val updateResult = (updateUiState as? UpdateUiState.Result)?.checkResult
+            if (updateResult is UpdateCheckResult.UpdateAvailable || updateResult is UpdateCheckResult.Error) {
+                TextButton(onClick = onDismiss) {
+                    Text("Close", color = TextSecondary)
+                }
+            }
+        }
+    )
 }

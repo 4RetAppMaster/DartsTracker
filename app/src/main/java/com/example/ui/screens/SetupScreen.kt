@@ -5,13 +5,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,8 +25,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -95,9 +102,12 @@ fun SetupScreen(
     }
 
     var draggingPlayerId by remember { mutableStateOf<Long?>(null) }
-    var dragOffsetY by remember { mutableStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var playerRowHeightPx by remember { mutableFloatStateOf(0f) }
+    val listState = rememberLazyListState()
+    val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
-    val itemHeightPx = with(density) { 68.dp.toPx() }
+    val itemSpacingPx = with(density) { 8.dp.toPx() }
 
     // Map selected IDs to actual Player objects in selected order
     val selectedPlayersList = remember(players, selectedPlayerIds) {
@@ -108,6 +118,8 @@ fun SetupScreen(
         modifier = modifier.fillMaxSize()
     ) {
         LazyColumn(
+            state = listState,
+            userScrollEnabled = (draggingPlayerId == null),
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -456,25 +468,29 @@ fun SetupScreen(
                 }
             } else {
                 @OptIn(ExperimentalFoundationApi::class)
-                itemsIndexed(selectedPlayersList, key = { _, item -> item.id }) { index, player ->
+                itemsIndexed(selectedPlayersList, key = { _, item -> item.id }) { _, player ->
                     val isDragging = (draggingPlayerId == player.id)
-                    val maxUpDrag = -index * itemHeightPx
-                    val maxDownDrag = (selectedPlayersList.size - 1 - index) * itemHeightPx
+
+                    val rowModifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { size ->
+                            if (size.height > 0) {
+                                playerRowHeightPx = size.height.toFloat()
+                            }
+                        }
+                        .then(if (!isDragging) Modifier.animateItemPlacement() else Modifier)
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffsetY else 0f
+                            scaleX = if (isDragging) 1.02f else 1f
+                            scaleY = if (isDragging) 1.02f else 1f
+                            shadowElevation = if (isDragging) 12.dp.toPx() else 0f
+                        }
+                        .clip(RoundedCornerShape(14.dp))
+                        .testTag("selected_player_row_${player.id}")
 
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .animateItemPlacement()
-                            .zIndex(if (isDragging) 10f else 1f)
-                            .graphicsLayer {
-                                val clampedOffset = if (isDragging) dragOffsetY.coerceIn(maxUpDrag, maxDownDrag) else 0f
-                                translationY = clampedOffset
-                                scaleX = if (isDragging) 1.02f else 1f
-                                scaleY = if (isDragging) 1.02f else 1f
-                                shadowElevation = if (isDragging) 12.dp.toPx() else 0f
-                            }
-                            .clip(RoundedCornerShape(14.dp))
-                            .testTag("selected_player_row_${player.id}"),
+                        modifier = rowModifier,
                         shape = RoundedCornerShape(14.dp),
                         color = if (isDragging) AppSurfaceElevated else AppSurface,
                         border = androidx.compose.foundation.BorderStroke(
@@ -494,46 +510,85 @@ fun SetupScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                // 2-Line Drag and Drop Handle
+                                // 2-Line Drag and Drop Handle (window-space tracking avoids translationY feedback loop)
+                                var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
                                 Surface(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .pointerInput(player.id, selectedPlayersList.size) {
-                                            detectVerticalDragGestures(
-                                                onDragStart = {
-                                                    draggingPlayerId = player.id
-                                                    dragOffsetY = 0f
-                                                },
-                                                onDragEnd = {
-                                                    draggingPlayerId = null
-                                                    dragOffsetY = 0f
-                                                },
-                                                onDragCancel = {
-                                                    draggingPlayerId = null
-                                                    dragOffsetY = 0f
-                                                }
-                                            ) { change, dragAmount ->
-                                                change.consume()
-                                                val currentIds = viewModel.selectedPlayerIds.value
-                                                val currentIndex = currentIds.indexOf(player.id)
-                                                if (currentIndex != -1) {
-                                                    val limitUp = -currentIndex * itemHeightPx
-                                                    val limitDown = (currentIds.size - 1 - currentIndex) * itemHeightPx
-                                                    dragOffsetY = (dragOffsetY + dragAmount).coerceIn(limitUp, limitDown)
+                                        .size(48.dp, 42.dp)
+                                        .onGloballyPositioned { coords ->
+                                            handleCoords = coords
+                                        }
+                                        .pointerInput(player.id) {
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                val startCoords = handleCoords
+                                                if (startCoords == null || !startCoords.isAttached) return@awaitEachGesture
 
-                                                    val shift = (dragOffsetY / itemHeightPx).toInt()
-                                                    if (shift != 0) {
-                                                        val targetIndex = (currentIndex + shift).coerceIn(0, currentIds.size - 1)
-                                                        if (targetIndex != currentIndex) {
-                                                            viewModel.reorderSelectedPlayers(currentIndex, targetIndex)
-                                                            dragOffsetY -= (targetIndex - currentIndex) * itemHeightPx
+                                                val startIndex = viewModel.selectedPlayerIds.value.indexOf(player.id)
+                                                if (startIndex == -1) return@awaitEachGesture
+
+                                                down.consume()
+                                                var lastWindowY = startCoords.localToWindow(down.position).y
+                                                var currentIndex = startIndex
+                                                var currentOffset = 0f
+
+                                                draggingPlayerId = player.id
+                                                dragOffsetY = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                                                try {
+                                                    while (true) {
+                                                        val event = awaitPointerEvent(PointerEventPass.Main)
+                                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                                            ?: event.changes.firstOrNull()
+                                                        if (change == null || !change.pressed) {
+                                                            break
                                                         }
+
+                                                        val coords = handleCoords
+                                                        val currentWindowY = if (coords != null && coords.isAttached) {
+                                                            coords.localToWindow(change.position).y
+                                                        } else {
+                                                            lastWindowY
+                                                        }
+                                                        val deltaY = currentWindowY - lastWindowY
+                                                        lastWindowY = currentWindowY
+                                                        change.consume()
+
+                                                        val listSize = viewModel.selectedPlayerIds.value.size
+                                                        if (listSize <= 1) continue
+
+                                                        val stepPx = (if (playerRowHeightPx > 0f) playerRowHeightPx else with(density) { 64.dp.toPx() }) + itemSpacingPx
+                                                        val minOffset = -currentIndex * stepPx
+                                                        val maxOffset = (listSize - 1 - currentIndex) * stepPx
+
+                                                        currentOffset = (currentOffset + deltaY).coerceIn(minOffset, maxOffset)
+
+                                                        while (currentOffset > stepPx * 0.5f && currentIndex < listSize - 1) {
+                                                            viewModel.reorderSelectedPlayers(currentIndex, currentIndex + 1)
+                                                            currentIndex += 1
+                                                            currentOffset -= stepPx
+                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        }
+
+                                                        while (currentOffset < -stepPx * 0.5f && currentIndex > 0) {
+                                                            viewModel.reorderSelectedPlayers(currentIndex, currentIndex - 1)
+                                                            currentIndex -= 1
+                                                            currentOffset += stepPx
+                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        }
+
+                                                        dragOffsetY = currentOffset
                                                     }
+                                                } finally {
+                                                    draggingPlayerId = null
+                                                    dragOffsetY = 0f
                                                 }
                                             }
                                         },
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (isDragging) BrandPrimary.copy(alpha = 0.2f) else AppSurfaceElevated
+                                    color = if (isDragging) BrandPrimary.copy(alpha = 0.25f) else AppSurfaceElevated
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         TwoLineDragHandle(

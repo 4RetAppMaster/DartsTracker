@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -10,6 +12,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,8 +26,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.engine.CheckoutCalculator
 import com.example.model.*
+import com.example.ui.components.ConfettiPopOverlay
 import com.example.ui.theme.*
 import com.example.viewmodel.ActiveMatchState
 import com.example.viewmodel.DartsViewModel
@@ -38,7 +44,14 @@ fun LiveScoringScreen(
     val activeMatch by viewModel.activeMatch.collectAsState()
     val match = activeMatch ?: return
 
-    var selectedMultiplier by remember { mutableStateOf(Multiplier.SINGLE) }
+    var selectedMultiplier by remember(match.tournamentMatchId, match.currentSet, match.currentLeg) {
+        mutableStateOf(Multiplier.SINGLE)
+    }
+
+    // Hardware Back reverts a false win when any winning popup is displayed
+    BackHandler(enabled = match.pendingSubWin != null || match.isMatchOver) {
+        viewModel.revertFalseWin()
+    }
 
     val playersListState = rememberLazyListState()
 
@@ -73,7 +86,7 @@ fun LiveScoringScreen(
                     color = BrandPrimaryContainer
                 ) {
                     Text(
-                        text = "Set ${match.currentSet} / ${match.rules.setsToWin}",
+                        text = "Set ${match.currentSet}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = BrandOnPrimaryContainer,
@@ -88,7 +101,7 @@ fun LiveScoringScreen(
                     color = AppSurfaceElevated
                 ) {
                     Text(
-                        text = "Leg ${match.currentLeg} / ${match.rules.legsToWinSet}",
+                        text = "Leg ${match.currentLeg}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
@@ -117,43 +130,6 @@ fun LiveScoringScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            // Leg / Set Win Notification Banner
-            if (match.lastLegNotice != null) {
-                item(key = "leg_notice") {
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = BrandSuccessContainer,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BrandSuccess.copy(alpha = 0.5f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = BrandSuccess,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = match.lastLegNotice ?: "",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = BrandSuccess
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             // Bust Feedback Alert Banner
             if (match.isBustFeedback) {
                 item(key = "bust_feedback") {
@@ -338,17 +314,26 @@ fun LiveScoringScreen(
                             }
                         }
 
-                        // RIGHT COLUMN: 3-Dart Average
+                        // RIGHT COLUMN: 3-Dart Average + Set / Leg Wins
                         Column(
                             modifier = Modifier.weight(0.8f),
                             horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.Center
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
                                 text = "Avg ${String.format("%.1f", pState.threeDartAverage)}",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (isActive) BrandPrimary else TextSecondary
+                                color = if (isActive) BrandPrimary else TextSecondary,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "S ${pState.setsWon} • L ${pState.legsWon}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (pState.setsWon > 0 || pState.legsWon > 0) BrandSecondary else TextMuted,
+                                maxLines = 1,
+                                modifier = Modifier.testTag("player_sets_legs_${pState.player.id}")
                             )
                         }
                     }
@@ -371,141 +356,295 @@ fun LiveScoringScreen(
         }
     }
 
-    // Match Winner Dialog
+    // 1. Sub-Win Popup (Won a Leg or Set, not the whole game yet) -> Green Popup + Confetti + Back + OK
+    match.pendingSubWin?.let { subWin ->
+        WinPopupWithConfetti(
+            isGreenIntermediateWin = true,
+            titleText = subWin.title,
+            headlineText = "${subWin.winnerName} wins this ${if (subWin.isSetWin) "set" else "leg"}!",
+            confirmLabel = "OK",
+            onBackRevert = { viewModel.revertFalseWin() },
+            onConfirm = { viewModel.confirmSubWinAndAdvance() },
+            burstKey = "${subWin.title}_${subWin.winnerPlayerId}_${match.turnHistory.size}",
+            statsContent = {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = AppSurfaceElevated,
+                    border = BorderStroke(1.dp, BrandSuccess.copy(alpha = 0.45f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Sets Won", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "${subWin.setsWon} / ${match.rules.setsToWin}",
+                                color = BrandSuccess,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Legs Won in Set", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "${subWin.legsWon} / ${match.rules.legsToWinSet}",
+                                color = BrandSuccess,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Up Next", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "Set ${subWin.nextSet} • Leg ${subWin.nextLeg}",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    // 2. Match Winner Popup (Tournament intermediate match -> Green Popup -> Continue returns to match selector; Whole Game -> Gold Popup -> Continue)
     if (match.isMatchOver && match.winner != null) {
         val winner = match.winner!!
-        AlertDialog(
-            onDismissRequest = { /* force action */ },
-            containerColor = AppSurface,
-            title = {
-                Column(
+        val isIntermediateTournamentMatch = remember(match.tournamentMatchId, winner.player.id) {
+            viewModel.hasNextTournamentMatch(match)
+        }
+
+        WinPopupWithConfetti(
+            isGreenIntermediateWin = isIntermediateTournamentMatch,
+            titleText = "MATCH WON!",
+            headlineText = "${winner.player.name} is the Winner!",
+            confirmLabel = "Continue",
+            onBackRevert = { viewModel.revertFalseWin() },
+            onConfirm = { viewModel.confirmMatchWinAndExit() },
+            burstKey = "MATCH_${winner.player.id}_${match.turnHistory.size}",
+            statsContent = {
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    shape = RoundedCornerShape(14.dp),
+                    color = AppSurfaceElevated,
+                    border = BorderStroke(
+                        1.dp,
+                        if (isIntermediateTournamentMatch) BrandSuccess.copy(alpha = 0.45f) else AppBorder
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Final Sets Won", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "${winner.setsWon} / ${match.rules.setsToWin}",
+                                color = if (isIntermediateTournamentMatch) BrandSuccess else BrandPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("3-Dart Average", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = String.format("%.1f", winner.threeDartAverage),
+                                color = if (isIntermediateTournamentMatch) BrandSuccess else BrandPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Total Darts Thrown", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "${winner.totalDartsThrown}",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Highest Turn Score", color = TextSecondary, fontSize = 13.sp)
+                            Text(
+                                text = "${winner.highestTurnScore}",
+                                color = BrandSuccess,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun WinPopupWithConfetti(
+    isGreenIntermediateWin: Boolean,
+    titleText: String,
+    headlineText: String,
+    confirmLabel: String,
+    onBackRevert: () -> Unit,
+    onConfirm: () -> Unit,
+    burstKey: Any,
+    statsContent: @Composable ColumnScope.() -> Unit
+) {
+    val accentColor = if (isGreenIntermediateWin) BrandSuccess else BrandSecondary
+    val accentContainer = if (isGreenIntermediateWin) BrandSuccessContainer else BrandSecondaryContainer
+    val cardBackground = if (isGreenIntermediateWin) Color(0xFF102A1C) else AppSurface
+
+    Dialog(
+        onDismissRequest = { /* Force Back or Confirm action */ },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.65f)),
+            contentAlignment = Alignment.Center
+        ) {
+            // Confetti popping BEHIND the popup window
+            ConfettiPopOverlay(
+                modifier = Modifier.fillMaxSize(),
+                burstKey = burstKey
+            )
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .widthIn(max = 380.dp)
+                    .testTag("win_popup_card"),
+                shape = RoundedCornerShape(24.dp),
+                color = cardBackground,
+                border = BorderStroke(2.dp, accentColor),
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Surface(
                         modifier = Modifier.size(64.dp),
                         shape = CircleShape,
-                        color = BrandSecondaryContainer
+                        color = accentContainer,
+                        border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.6f))
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.EmojiEvents,
+                                imageVector = if (isGreenIntermediateWin) Icons.Default.CheckCircle else Icons.Default.EmojiEvents,
                                 contentDescription = null,
-                                tint = BrandSecondary,
+                                tint = accentColor,
                                 modifier = Modifier.size(36.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
+
                     Text(
-                        text = "MATCH WON!",
+                        text = titleText,
                         fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = BrandSecondary,
-                        letterSpacing = 1.sp
+                        fontWeight = FontWeight.Black,
+                        color = accentColor,
+                        letterSpacing = 1.sp,
+                        textAlign = TextAlign.Center
                     )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+
                     Text(
-                        text = "${winner.player.name} is the Winner!",
+                        text = headlineText,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         textAlign = TextAlign.Center
                     )
 
-                    Surface(
+                    statsContent()
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        color = AppSurfaceElevated,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        OutlinedButton(
+                            onClick = onBackRevert,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("winner_dialog_back_button"),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, AppBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = AppSurfaceElevated,
+                                contentColor = TextPrimary
+                            )
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Final Sets Won", color = TextSecondary, fontSize = 13.sp)
-                                Text(
-                                    text = "${winner.setsWon} / ${match.rules.setsToWin}",
-                                    color = BrandPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("3-Dart Average", color = TextSecondary, fontSize = 13.sp)
-                                Text(
-                                    text = String.format("%.1f", winner.threeDartAverage),
-                                    color = BrandPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Total Darts Thrown", color = TextSecondary, fontSize = 13.sp)
-                                Text(
-                                    text = "${winner.totalDartsThrown}",
-                                    color = TextPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Highest Turn Score", color = TextSecondary, fontSize = 13.sp)
-                                Text(
-                                    text = "${winner.highestTurnScore}",
-                                    color = BrandSuccess,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Undo,
+                                contentDescription = "Revert",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Revert",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = onConfirm,
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                                .testTag("winner_dialog_confirm_button"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isGreenIntermediateWin) BrandSuccess else BrandPrimary,
+                                contentColor = if (isGreenIntermediateWin) Color(0xFF042211) else BrandOnPrimary
+                            )
+                        ) {
+                            Text(
+                                text = confirmLabel,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
                         }
                     }
-
-                    Text(
-                        text = "Win and loss records have been updated automatically in player profiles.",
-                        fontSize = 11.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.exitMatch() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("winner_dialog_confirm_button"),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary, contentColor = BrandOnPrimary)
-                ) {
-                    Text(
-                        text = if (match.tournamentMatchId != null) "Return to Tournament" else "Back to Setup",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
                 }
             }
-        )
+        }
     }
 }
 

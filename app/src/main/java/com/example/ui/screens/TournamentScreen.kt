@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.example.engine.DartsEngine
 import com.example.model.TournamentMatch
 import com.example.model.TournamentType
+import com.example.ui.components.ConfettiPopOverlay
 import com.example.ui.components.PlayerAvatar
 import com.example.ui.theme.*
 import com.example.viewmodel.DartsViewModel
@@ -119,45 +120,51 @@ fun TournamentScreen(
             // Champion Banner if Finished
             if (t.isFinished && t.champion != null) {
                 item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = BrandSecondaryContainer.copy(alpha = 0.45f),
-                        border = androidx.compose.foundation.BorderStroke(2.dp, BrandSecondary)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        ConfettiPopOverlay(
+                            modifier = Modifier.matchParentSize(),
+                            burstKey = "CHAMPION_${t.champion!!.id}"
+                        )
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = BrandSecondaryContainer.copy(alpha = 0.65f),
+                            border = androidx.compose.foundation.BorderStroke(2.dp, BrandSecondary)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.EmojiEvents,
-                                contentDescription = null,
-                                tint = BrandSecondary,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Text(
-                                text = "TOURNAMENT CHAMPION",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BrandSecondary,
-                                letterSpacing = 1.5.sp
-                            )
-                            Text(
-                                text = t.champion!!.name,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Button(
-                                onClick = { viewModel.endTournament() },
-                                colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary, contentColor = BrandOnPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.testTag("finish_tournament_btn")
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Finish Tournament", fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = Icons.Default.EmojiEvents,
+                                    contentDescription = null,
+                                    tint = BrandSecondary,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(
+                                    text = "TOURNAMENT CHAMPION",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrandSecondary,
+                                    letterSpacing = 1.5.sp
+                                )
+                                Text(
+                                    text = t.champion!!.name,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Button(
+                                    onClick = { viewModel.endTournament() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary, contentColor = BrandOnPrimary),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("finish_tournament_btn")
+                                ) {
+                                    Text("Continue", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }

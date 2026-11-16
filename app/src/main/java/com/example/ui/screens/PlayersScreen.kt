@@ -2,12 +2,16 @@ package com.example.ui.screens
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,7 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.Player
 import com.example.ui.theme.*
 import com.example.viewmodel.DartsViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PlayersScreen(
@@ -438,18 +444,81 @@ private fun PlayerBackupDialog(
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
 
+    val allPlayers by viewModel.allPlayers.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Export, 1 = Import
     var exportedJson by remember { mutableStateOf("") }
     var copyNotice by remember { mutableStateOf(false) }
+    var exportStatusMessage by remember { mutableStateOf<String?>(null) }
+    var isExportSuccess by remember { mutableStateOf(false) }
 
     var importJsonText by remember { mutableStateOf("") }
     var replaceAll by remember { mutableStateOf(false) }
+    val currentReplaceAll by rememberUpdatedState(replaceAll)
     var importStatusMessage by remember { mutableStateOf<String?>(null) }
     var isImportSuccess by remember { mutableStateOf(false) }
+    var isFileLoadedPending by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(allPlayers) {
         exportedJson = viewModel.exportPlayersJson()
+    }
+
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                val jsonToWrite = viewModel.exportPlayersJson()
+                val saveRes = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val stream = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: context.contentResolver.openOutputStream(uri)
+                            ?: error("Unable to open destination file.")
+                        stream.use { out ->
+                            out.write(jsonToWrite.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
+                    }
+                }
+                if (saveRes.isSuccess) {
+                    isExportSuccess = true
+                    exportStatusMessage = "Player database saved to file!"
+                } else {
+                    isExportSuccess = false
+                    exportStatusMessage = "Save failed: ${saveRes.exceptionOrNull()?.message}"
+                }
+            }
+        }
+    }
+
+    val openFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            isImporting = true
+            isFileLoadedPending = false
+            importStatusMessage = null
+            coroutineScope.launch {
+                val readRes = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            stream.readBytes().toString(Charsets.UTF_8)
+                        } ?: error("Unable to read selected file.")
+                    }
+                }
+                isImporting = false
+                if (readRes.isFailure) {
+                    isImportSuccess = false
+                    importStatusMessage = "Could not read file: ${readRes.exceptionOrNull()?.message}"
+                } else {
+                    val fileText = readRes.getOrNull().orEmpty()
+                    importJsonText = fileText
+                    isImportSuccess = false
+                    isFileLoadedPending = true
+                    importStatusMessage = "File loaded. Tap Import below to apply."
+                }
+            }
+        }
     }
 
     AlertDialog(
@@ -492,7 +561,8 @@ private fun PlayerBackupDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 440.dp),
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Tab Switcher
@@ -513,7 +583,7 @@ private fun PlayerBackupDialog(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = "Export ($playerCount)",
+                                text = "Export",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selectedTab == 0) BrandOnPrimaryContainer else TextSecondary
@@ -531,7 +601,7 @@ private fun PlayerBackupDialog(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = "Import DB",
+                                text = "Import",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (selectedTab == 1) BrandOnPrimaryContainer else TextSecondary
@@ -543,16 +613,37 @@ private fun PlayerBackupDialog(
                 if (selectedTab == 0) {
                     // EXPORT TAB
                     Text(
-                        text = "Export $playerCount players with all match stats and win-loss records as JSON.",
+                        text = "Save $playerCount players with match stats to a JSON file, copy, or share.",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
+
+                    // Primary Save File Button
+                    Button(
+                        onClick = {
+                            exportStatusMessage = null
+                            saveFileLauncher.launch("dartstracker_players.json")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("btn_save_export_file"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = BrandOnPrimary
+                        )
+                    ) {
+                        Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save to File (.json)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
+                        OutlinedButton(
                             onClick = {
                                 clipboardManager.setText(AnnotatedString(exportedJson))
                                 copyNotice = true
@@ -562,9 +653,10 @@ private fun PlayerBackupDialog(
                                 .height(40.dp)
                                 .testTag("btn_copy_export_json"),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = BrandPrimary,
-                                contentColor = BrandOnPrimary
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = AppSurface,
+                                contentColor = TextPrimary
                             ),
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
@@ -600,38 +692,107 @@ private fun PlayerBackupDialog(
                         }
                     }
 
+                    exportStatusMessage?.let { status ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isExportSuccess) BrandSuccessContainer.copy(alpha = 0.5f) else BrandErrorContainer.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isExportSuccess) BrandSuccess else BrandError
+                            )
+                        ) {
+                            Text(
+                                text = status,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isExportSuccess) BrandSuccess else BrandError,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
                     // JSON Preview Box
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .heightIn(max = 180.dp),
+                            .heightIn(min = 80.dp, max = 160.dp),
                         shape = RoundedCornerShape(8.dp),
                         color = AppBg,
                         border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
                     ) {
-                        LazyColumn(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
                         ) {
-                            item {
-                                Text(
-                                    text = exportedJson.ifBlank { "No players to export." },
-                                    fontSize = 11.sp,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = TextSecondary
-                                )
-                            }
+                            Text(
+                                text = exportedJson.ifBlank { "No players to export." },
+                                fontSize = 11.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = TextSecondary
+                            )
                         }
                     }
                 } else {
                     // IMPORT TAB
                     Text(
-                        text = "Paste player JSON or backup data below to restore or add players.",
+                        text = "Choose a backup .json file or paste JSON text below to restore or add players.",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
+
+                    // Choose File Button (loads file without importing immediately)
+                    OutlinedButton(
+                        onClick = {
+                            isFileLoadedPending = false
+                            importStatusMessage = null
+                            openFileLauncher.launch(arrayOf("*/*"))
+                        },
+                        enabled = !isImporting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("btn_import_from_file"),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BrandPrimary),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = BrandPrimaryContainer.copy(alpha = 0.25f),
+                            contentColor = BrandPrimary
+                        )
+                    ) {
+                        Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Choose File (.json)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Status / feedback message after selecting a file or importing
+                    importStatusMessage?.let { status ->
+                        val bannerContainerColor = when {
+                            isFileLoadedPending -> BrandPrimaryContainer.copy(alpha = 0.45f)
+                            isImportSuccess -> BrandSuccessContainer.copy(alpha = 0.5f)
+                            else -> BrandErrorContainer.copy(alpha = 0.5f)
+                        }
+                        val bannerAccentColor = when {
+                            isFileLoadedPending -> BrandPrimary
+                            isImportSuccess -> BrandSuccess
+                            else -> BrandError
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = bannerContainerColor,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, bannerAccentColor)
+                        ) {
+                            Text(
+                                text = status,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = bannerAccentColor,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -639,7 +800,7 @@ private fun PlayerBackupDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Paste JSON Data:",
+                            text = "Or Paste JSON Data:",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
@@ -650,6 +811,8 @@ private fun PlayerBackupDialog(
                                 val clip = clipboardManager.getText()
                                 if (clip != null) {
                                     importJsonText = clip.text
+                                    isFileLoadedPending = false
+                                    importStatusMessage = null
                                 }
                             },
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
@@ -664,12 +827,13 @@ private fun PlayerBackupDialog(
                         value = importJsonText,
                         onValueChange = {
                             importJsonText = it
+                            isFileLoadedPending = false
                             importStatusMessage = null
                         },
                         placeholder = { Text("[{\"name\": \"Player 1\", \"wins\": 2, ...}]", color = TextMuted, fontSize = 11.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp)
+                            .height(110.dp)
                             .testTag("import_json_textfield"),
                         shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -686,81 +850,71 @@ private fun PlayerBackupDialog(
                         )
                     )
 
-                    // Replace vs Merge option
+                    // Mandatory confirmation checkbox right above the Import button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { replaceAll = !replaceAll }
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 4.dp)
+                            .testTag("checkbox_replace_entire_db"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
                             checked = replaceAll,
                             onCheckedChange = { replaceAll = it },
-                            colors = CheckboxDefaults.colors(checkedColor = BrandPrimary),
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = BrandError,
+                                uncheckedColor = BrandError
+                            ),
                             modifier = Modifier.size(28.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(
-                                text = if (replaceAll) "Replace entire database" else "Merge with existing players",
+                                text = "Replace entire database",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (replaceAll) BrandError else TextPrimary
+                                color = BrandError
                             )
                             Text(
-                                text = if (replaceAll) "Deletes all current players and replaces with import" else "Updates matching names, adds new players",
+                                text = "Mandatory: You must click this box before importing (deletes current players and replaces with import).",
                                 fontSize = 10.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-
-                    // Status / feedback message
-                    importStatusMessage?.let { status ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isImportSuccess) BrandSuccessContainer.copy(alpha = 0.5f) else BrandErrorContainer.copy(alpha = 0.5f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isImportSuccess) BrandSuccess else BrandError
-                            )
-                        ) {
-                            Text(
-                                text = status,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isImportSuccess) BrandSuccess else BrandError,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                color = if (replaceAll) TextSecondary else BrandError
                             )
                         }
                     }
 
                     Button(
                         onClick = {
+                            isFileLoadedPending = false
                             if (importJsonText.isBlank()) {
-                                importStatusMessage = "Please paste valid JSON text first."
                                 isImportSuccess = false
+                                importStatusMessage = "Please choose a .json file or paste JSON text first."
+                                return@Button
+                            }
+                            if (!currentReplaceAll) {
+                                isImportSuccess = false
+                                importStatusMessage = "Mandatory: Please check 'Replace entire database' before importing."
                                 return@Button
                             }
                             isImporting = true
                             coroutineScope.launch {
-                                val res = viewModel.importPlayersJson(importJsonText, replaceAll)
+                                val res = viewModel.importPlayersJson(importJsonText, currentReplaceAll)
                                 isImporting = false
                                 if (res.isSuccess) {
                                     val count = res.getOrNull() ?: 0
                                     isImportSuccess = true
                                     importStatusMessage = "Successfully imported $count player(s)!"
                                     importJsonText = ""
+                                    exportedJson = viewModel.exportPlayersJson()
                                 } else {
                                     isImportSuccess = false
                                     importStatusMessage = "Import failed: ${res.exceptionOrNull()?.message}"
                                 }
                             }
                         },
-                        enabled = !isImporting && importJsonText.isNotBlank(),
+                        enabled = !isImporting,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
@@ -778,7 +932,7 @@ private fun PlayerBackupDialog(
                         } else {
                             Icon(imageVector = Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import Database", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Import", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }

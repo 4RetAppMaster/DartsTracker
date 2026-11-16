@@ -68,15 +68,19 @@ data class PlayerGameState(
     val currentScore: Int,
     val hasDoubleInAchieved: Boolean = false,
     val turns: List<TurnScore> = emptyList(),
+    val archivedTurns: List<TurnScore> = emptyList(),
     val legsWon: Int = 0,
     val setsWon: Int = 0,
     val isWinner: Boolean = false
 ) {
+    private val allMatchTurns: List<TurnScore>
+        get() = archivedTurns + turns
+
     val totalDartsThrown: Int
-        get() = turns.sumOf { it.darts.size }
+        get() = allMatchTurns.sumOf { it.darts.size }
 
     val totalPointsScored: Int
-        get() = turns.filter { !it.isBust }.sumOf { it.totalPoints }
+        get() = allMatchTurns.filter { !it.isBust }.sumOf { it.totalPoints }
 
     val threeDartAverage: Double
         get() {
@@ -85,7 +89,7 @@ data class PlayerGameState(
         }
 
     val highestTurnScore: Int
-        get() = turns.filter { !it.isBust }.maxOfOrNull { it.totalPoints } ?: 0
+        get() = allMatchTurns.filter { !it.isBust }.maxOfOrNull { it.totalPoints } ?: 0
 }
 
 enum class TournamentType(val title: String, val subtitle: String) {
