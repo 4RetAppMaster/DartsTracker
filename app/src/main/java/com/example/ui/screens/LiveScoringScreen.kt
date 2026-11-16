@@ -1,0 +1,808 @@
+package com.example.ui.screens
+
+import androidx.compose.animation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.engine.CheckoutCalculator
+import com.example.model.*
+import com.example.ui.theme.*
+import com.example.viewmodel.ActiveMatchState
+import com.example.viewmodel.DartsViewModel
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LiveScoringScreen(
+    viewModel: DartsViewModel,
+    modifier: Modifier = Modifier
+) {
+    val activeMatch by viewModel.activeMatch.collectAsState()
+    val match = activeMatch ?: return
+
+    var selectedMultiplier by remember { mutableStateOf(Multiplier.SINGLE) }
+
+    val playersListState = rememberLazyListState()
+
+    // When currentPlayer changes and there are many players, scroll to keep active player in view without reordering
+    LaunchedEffect(match.currentPlayerIndex) {
+        if (match.players.size > 2) {
+            playersListState.animateScrollToItem(match.currentPlayerIndex)
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AppBg)
+    ) {
+        // Top Match Info Bar: Sets & Legs info (no undo button)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = AppSurface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                // Match format badges
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = BrandPrimaryContainer
+                ) {
+                    Text(
+                        text = "Set ${match.currentSet} / ${match.rules.setsToWin}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = BrandOnPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = AppSurfaceElevated
+                ) {
+                    Text(
+                        text = "Leg ${match.currentLeg} / ${match.rules.legsToWinSet}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = "•  ${match.rules.gameType.displayName}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        // Scrollable Players Section (Original Order, scrolls when there are many players)
+        LazyColumn(
+            state = playersListState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 8.dp)
+        ) {
+            // Leg / Set Win Notification Banner
+            if (match.lastLegNotice != null) {
+                item(key = "leg_notice") {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = BrandSuccessContainer,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BrandSuccess.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = BrandSuccess,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = match.lastLegNotice ?: "",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrandSuccess
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bust Feedback Alert Banner
+            if (match.isBustFeedback) {
+                item(key = "bust_feedback") {
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = BrandErrorContainer,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BrandError.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = "Bust",
+                                    tint = BrandError,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "BUST! Turn score reset.",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrandOnErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Display players in original order, active player highlighted
+            itemsIndexed(match.players, key = { _, p -> p.player.id }) { idx, pState ->
+                val isActive = (idx == match.currentPlayerIndex)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp)),
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isActive) BrandPrimaryContainer.copy(alpha = 0.35f) else AppSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        if (isActive) 1.5.dp else 1.dp,
+                        if (isActive) BrandPrimary else AppBorder
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // LEFT COLUMN: Remaining Points (top) | Player Name (bottom)
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "${pState.currentScore}",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isActive) BrandPrimary else TextPrimary
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = pState.player.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isActive) BrandPrimary else TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                if (match.rules.doubleIn && !pState.hasDoubleInAchieved) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = BrandSecondaryContainer
+                                    ) {
+                                        Text(
+                                            text = "Needs DI",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BrandSecondary,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // CENTER COLUMN: D1 D2 D3 (top) | Round Points (bottom)
+                        Column(
+                            modifier = Modifier.weight(1.1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // D1 D2 D3 Slots (Fixed width so card never resizes or shifts)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                (0..2).forEach { slotIndex ->
+                                    val dart = if (isActive) {
+                                        match.currentDarts.getOrNull(slotIndex)
+                                    } else {
+                                        pState.turns.lastOrNull()?.darts?.getOrNull(slotIndex)
+                                    }
+                                    val isCurrentSlot = isActive && (slotIndex == match.currentDarts.size)
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .width(34.dp)
+                                            .height(20.dp),
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = when {
+                                            dart != null -> BrandSuccessContainer.copy(alpha = 0.5f)
+                                            isCurrentSlot -> BrandPrimary.copy(alpha = 0.15f)
+                                            else -> AppSurfaceElevated
+                                        },
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            when {
+                                                dart != null -> BrandSuccess.copy(alpha = 0.6f)
+                                                isCurrentSlot -> BrandPrimary
+                                                else -> AppBorder
+                                            }
+                                        )
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            Text(
+                                                text = dart?.label ?: "D${slotIndex + 1}",
+                                                fontSize = 10.sp,
+                                                fontWeight = if (dart != null || isCurrentSlot) FontWeight.Bold else FontWeight.Normal,
+                                                color = when {
+                                                    dart != null -> BrandSuccess
+                                                    isCurrentSlot -> BrandPrimary
+                                                    else -> TextMuted
+                                                },
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Total points in that round (without "Last:" prefix)
+                            val roundPoints = if (isActive) {
+                                if (match.currentDarts.isNotEmpty()) {
+                                    match.currentDarts.sumOf { it.points }
+                                } else {
+                                    pState.turns.lastOrNull()?.totalPoints ?: 0
+                                }
+                            } else {
+                                pState.turns.lastOrNull()?.totalPoints ?: 0
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isActive && match.currentDarts.isNotEmpty()) BrandPrimaryContainer else AppSurfaceElevated
+                            ) {
+                                Text(
+                                    text = "$roundPoints pts",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isActive && match.currentDarts.isNotEmpty()) BrandOnPrimaryContainer else TextSecondary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+
+                        // RIGHT COLUMN: 3-Dart Average
+                        Column(
+                            modifier = Modifier.weight(0.8f),
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "Avg ${String.format("%.1f", pState.threeDartAverage)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isActive) BrandPrimary else TextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fixed Dart Pad at the bottom (bigger D1-D3 boxes, Double/Triple/Backspace on right)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = AppBg,
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+        ) {
+            DartByDartInterface(
+                match = match,
+                selectedMultiplier = selectedMultiplier,
+                onSelectMultiplier = { selectedMultiplier = it },
+                viewModel = viewModel
+            )
+        }
+    }
+
+    // Match Winner Dialog
+    if (match.isMatchOver && match.winner != null) {
+        val winner = match.winner!!
+        AlertDialog(
+            onDismissRequest = { /* force action */ },
+            containerColor = AppSurface,
+            title = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Surface(
+                        modifier = Modifier.size(64.dp),
+                        shape = CircleShape,
+                        color = BrandSecondaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.EmojiEvents,
+                                contentDescription = null,
+                                tint = BrandSecondary,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "MATCH WON!",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = BrandSecondary,
+                        letterSpacing = 1.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "${winner.player.name} is the Winner!",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = AppSurfaceElevated,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Final Sets Won", color = TextSecondary, fontSize = 13.sp)
+                                Text(
+                                    text = "${winner.setsWon} / ${match.rules.setsToWin}",
+                                    color = BrandPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("3-Dart Average", color = TextSecondary, fontSize = 13.sp)
+                                Text(
+                                    text = String.format("%.1f", winner.threeDartAverage),
+                                    color = BrandPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Total Darts Thrown", color = TextSecondary, fontSize = 13.sp)
+                                Text(
+                                    text = "${winner.totalDartsThrown}",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Highest Turn Score", color = TextSecondary, fontSize = 13.sp)
+                                Text(
+                                    text = "${winner.highestTurnScore}",
+                                    color = BrandSuccess,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Win and loss records have been updated automatically in player profiles.",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.exitMatch() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("winner_dialog_confirm_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary, contentColor = BrandOnPrimary)
+                ) {
+                    Text(
+                        text = if (match.tournamentMatchId != null) "Return to Tournament" else "Back to Setup",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DartByDartInterface(
+    match: ActiveMatchState,
+    selectedMultiplier: Multiplier,
+    onSelectMultiplier: (Multiplier) -> Unit,
+    viewModel: DartsViewModel
+) {
+    val currentPlayer = match.currentPlayer
+    val currentDarts = match.currentDarts
+
+    // Calculate remaining points dynamically based on throws in the current turn
+    val turnPoints = currentDarts.sumOf { it.points }
+    val remainingScore = (currentPlayer?.currentScore ?: 0) - turnPoints
+
+    val checkoutSuggestion = remember(remainingScore, match.rules.doubleOut) {
+        if (remainingScore > 1) {
+            CheckoutCalculator.getSuggestedCheckout(remainingScore, match.rules.doubleOut)
+        } else null
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Suggested Darts / Checkout Bar (Above numbers keypad - only middle-aligned targets, bigger size)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(12.dp)),
+            shape = RoundedCornerShape(12.dp),
+            color = if (checkoutSuggestion != null) BrandSuccessContainer.copy(alpha = 0.25f) else AppSurface,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (checkoutSuggestion != null) BrandSuccess.copy(alpha = 0.5f) else AppBorder
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checkoutSuggestion != null) {
+                    // Suggested target pills only, middle aligned and prominent
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val darts = checkoutSuggestion.split(" • ")
+                        darts.forEach { dartText ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = BrandSuccess,
+                                shadowElevation = 2.dp
+                            ) {
+                                Text(
+                                    text = dartText.trim(),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "${currentPlayer?.player?.name ?: "Player"}'s Turn  •  $remainingScore remaining",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+
+        // Keypad Section (Left: 5 columns of numbers; Right: Double, Triple, Erase)
+        val numRows = listOf(
+            listOf(1, 2, 3, 4, 5),
+            listOf(6, 7, 8, 9, 10),
+            listOf(11, 12, 13, 14, 15),
+            listOf(16, 17, 18, 19, 20),
+            listOf(0, 25, 50)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Numbers Grid (Left Column taking ~77% of width)
+            Column(
+                modifier = Modifier.weight(4.2f),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                numRows.forEachIndexed { rowIndex, rowNums ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (rowIndex == 4) {
+                            // Row with 0, 25, 50
+                            // 0 (Miss)
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1.5f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.addDartThrow(DartThrow(0, Multiplier.MISS))
+                                        onSelectMultiplier(Multiplier.SINGLE)
+                                    }
+                                    .testTag("dart_num_0"),
+                                shape = RoundedCornerShape(8.dp),
+                                color = AppSurface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "0",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                }
+                            }
+                            // 25 (Bull)
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1.75f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        val isDouble = selectedMultiplier == Multiplier.DOUBLE
+                                        viewModel.addDartThrow(DartThrow(25, if (isDouble) Multiplier.DOUBLE else Multiplier.SINGLE))
+                                        onSelectMultiplier(Multiplier.SINGLE)
+                                    }
+                                    .testTag("dart_num_25"),
+                                shape = RoundedCornerShape(8.dp),
+                                color = AppSurface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "25",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                }
+                            }
+                            // 50 (D-Bull)
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1.75f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.addDartThrow(DartThrow(25, Multiplier.DOUBLE))
+                                        onSelectMultiplier(Multiplier.SINGLE)
+                                    }
+                                    .testTag("dart_num_50"),
+                                shape = RoundedCornerShape(8.dp),
+                                color = AppSurface,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "50",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                }
+                            }
+                        } else {
+                            // Rows 1-4 (1 to 20)
+                            rowNums.forEach { num ->
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            viewModel.addDartThrow(DartThrow(num, selectedMultiplier))
+                                            onSelectMultiplier(Multiplier.SINGLE)
+                                        }
+                                        .testTag("dart_num_$num"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AppSurface,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, AppBorder)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "$num",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Right Action Column: "Double", "Triple", Delete / Erase Button
+            Column(
+                modifier = Modifier
+                    .weight(1.35f)
+                    .height(240.dp), // Matches the 5 rows of numbers
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                // "Double" Toggle Button (renamed from 2x)
+                val isDouble = (selectedMultiplier == Multiplier.DOUBLE)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            onSelectMultiplier(if (isDouble) Multiplier.SINGLE else Multiplier.DOUBLE)
+                        }
+                        .testTag("multiplier_DOUBLE"),
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isDouble) BrandSecondary else AppSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        if (isDouble) 2.dp else 1.dp,
+                        if (isDouble) BrandSecondary else AppBorder
+                    )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Double",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isDouble) Color.White else TextPrimary
+                        )
+                    }
+                }
+
+                // "Triple" Toggle Button (renamed from 3x)
+                val isTriple = (selectedMultiplier == Multiplier.TRIPLE)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            onSelectMultiplier(if (isTriple) Multiplier.SINGLE else Multiplier.TRIPLE)
+                        }
+                        .testTag("multiplier_TRIPLE"),
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isTriple) BrandPrimary else AppSurface,
+                    border = androidx.compose.foundation.BorderStroke(
+                        if (isTriple) 2.dp else 1.dp,
+                        if (isTriple) BrandPrimary else AppBorder
+                    )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Triple",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isTriple) Color.White else TextPrimary
+                        )
+                    }
+                }
+
+                // Delete / Erase Button (Red background, white icon - deletes dart or goes to previous player)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { viewModel.removeLastDartThrow() }
+                        .testTag("dart_erase_button"),
+                    shape = RoundedCornerShape(8.dp),
+                    color = BrandError,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BrandError)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Backspace,
+                            contentDescription = "Erase Dart",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

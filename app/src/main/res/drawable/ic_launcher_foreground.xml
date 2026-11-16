@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Simple, bold, crisp white dart centered diagonally -->
+    <!-- Dart Point -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,76 L40,68 L37,65 L32,76 Z" />
+
+    <!-- Dart Barrel & Shaft -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,69 L58,50 L54,46 L35,65 Z" />
+
+    <!-- Dart Flight Wings -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M56,48 L52,34 L66,38 L74,46 L60,52 Z" />
+
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M58,50 L66,38 L76,32 L70,42 L74,46 Z" />
+</vector>
+
+
+

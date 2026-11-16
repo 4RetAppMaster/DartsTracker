@@ -1,0 +1,7 @@
+{
+  "name": "DartsTracker",
+  "description": "High-contrast darts counter and scorer with 301, 401, 501, Double In/Out options, Tournaments (Round Robin & Elimination), and Player Win-Loss records.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
