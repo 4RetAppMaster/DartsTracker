@@ -44,8 +44,8 @@ class DartsViewModelTest {
     }
 
     @Test
-    fun versionName_isIncrementedTo1_7() {
-        assertEquals("1.7", BuildConfig.VERSION_NAME)
+    fun versionName_isIncrementedTo1_8() {
+        assertEquals("1.8", BuildConfig.VERSION_NAME)
     }
 
     @Test

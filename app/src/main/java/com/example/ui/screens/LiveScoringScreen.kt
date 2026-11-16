@@ -858,7 +858,7 @@ private fun DartByDartInterface(
                 }
             }
 
-            // Right Action Column: "Double", "Triple", Delete / Erase Button
+            // Right Action Column: "Double", "Triple", Revert Last Dart Button
             Column(
                 modifier = Modifier
                     .weight(1.35f)
@@ -932,8 +932,8 @@ private fun DartByDartInterface(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = AppIcons.Backspace,
-                            contentDescription = "Erase Dart",
+                            imageVector = AppIcons.Undo,
+                            contentDescription = "Revert Last Dart",
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )

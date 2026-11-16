@@ -21,6 +21,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
 import com.example.R
@@ -47,6 +50,17 @@ fun MainScreen(
     val activeTournament by viewModel.tournamentState.collectAsStateWithLifecycle()
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val updateUiState by viewModel.updateUiState.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                viewModel.onAppOpened()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Back handling: dismiss dialogs first if open
     BackHandler(enabled = showUpdateDialog) {
@@ -413,14 +427,20 @@ private fun AppVersionAndUpdateDialog(
                                             )
                                         }
                                         Text(
-                                            text = "Installed: $currentVerLabel  •  Latest tag: ${result.tagName}",
+                                            text = "Installed: $currentVerLabel  •  Latest: Ver ${result.latestVersion}",
                                             color = TextSecondary,
                                             fontSize = 12.sp
+                                        )
+                                        Text(
+                                            text = "An update is available. Would you like to update now or later?",
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
                                         )
                                         result.releaseNotes?.let { notes ->
                                             Text(
                                                 text = notes.take(300),
-                                                color = TextPrimary,
+                                                color = TextSecondary,
                                                 fontSize = 12.sp
                                             )
                                         }
@@ -512,8 +532,12 @@ private fun AppVersionAndUpdateDialog(
                 is UpdateCheckResult.UpdateAvailable -> {
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateResult.releaseUrl))
-                            context.startActivity(intent)
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateResult.releaseUrl))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                            }
+                            onDismiss()
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = BrandPrimary,
@@ -522,7 +546,7 @@ private fun AppVersionAndUpdateDialog(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.testTag("update_download_button")
                     ) {
-                        Text("Download Update", fontWeight = FontWeight.Bold)
+                        Text("Update", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -557,10 +581,21 @@ private fun AppVersionAndUpdateDialog(
         },
         dismissButton = {
             val updateResult = (updateUiState as? UpdateUiState.Result)?.checkResult
-            if (updateResult is UpdateCheckResult.UpdateAvailable || updateResult is UpdateCheckResult.Error) {
-                TextButton(onClick = onDismiss) {
-                    Text("Close", color = TextSecondary)
+            when (updateResult) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("update_later_button")
+                    ) {
+                        Text("Later", color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                    }
                 }
+                is UpdateCheckResult.Error -> {
+                    TextButton(onClick = onDismiss) {
+                        Text("Close", color = TextSecondary)
+                    }
+                }
+                else -> Unit
             }
         }
     )
