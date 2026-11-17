@@ -671,13 +671,13 @@ fun SetupScreen(
                     )
                 }
 
-                // Tournament Button
+                // Tournament Button (matched size with Start Match)
                 OutlinedButton(
                     onClick = { showTournamentDialog = true },
                     enabled = canStartTournament,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(42.dp)
+                        .height(48.dp)
                         .testTag("start_tournament_modal_button"),
                     shape = RoundedCornerShape(14.dp),
                     border = androidx.compose.foundation.BorderStroke(
@@ -693,7 +693,7 @@ fun SetupScreen(
                         imageVector = AppIcons.EmojiEvents,
                         contentDescription = null,
                         tint = if (canStartTournament) BrandSecondary else TextMuted,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
