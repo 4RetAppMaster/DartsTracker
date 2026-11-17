@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -977,20 +978,25 @@ private fun PlayerCompactCard(
         ) {
             // Player name and W-L-% directly under it
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 Text(
                     text = player.name,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "${player.wins}W - ${player.losses}L - ${player.winRatePercent}%",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1
                 )
             }
 
@@ -1002,40 +1008,40 @@ private fun PlayerCompactCard(
                 IconButton(
                     onClick = onEdit,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(48.dp)
                         .testTag("player_edit_${player.id}")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit Player",
                         tint = TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 IconButton(
                     onClick = onReset,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(48.dp)
                         .testTag("player_reset_${player.id}")
                 ) {
                     Icon(
                         imageVector = AppIcons.RestartAlt,
                         contentDescription = "Reset Stats",
                         tint = TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 IconButton(
                     onClick = onDelete,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(48.dp)
                         .testTag("player_delete_${player.id}")
                 ) {
                     Icon(
                         imageVector = AppIcons.DeleteOutline,
                         contentDescription = "Delete Player",
                         tint = BrandError,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
