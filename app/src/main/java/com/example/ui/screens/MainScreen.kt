@@ -1,13 +1,20 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -324,6 +331,7 @@ fun MainScreen(
         AppVersionAndUpdateDialog(
             updateUiState = updateUiState,
             onRetry = { viewModel.checkForUpdates(userInitiated = true) },
+            onStartUpdate = { version, url -> viewModel.startAutomaticUpdate(version, url) },
             onDismiss = { viewModel.dismissUpdateDialog() }
         )
     }
@@ -375,10 +383,84 @@ private fun CompactBottomNavItem(
 private fun AppVersionAndUpdateDialog(
     updateUiState: UpdateUiState,
     onRetry: () -> Unit,
+    onStartUpdate: (latestVersion: String, releaseUrl: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val currentVerLabel = "Ver ${BuildConfig.VERSION_NAME}"
+
+    var pendingInstallApkPath by remember { mutableStateOf<String?>(null) }
+    var launchedInstallForPath by remember { mutableStateOf<String?>(null) }
+    var needsInstallPermission by remember { mutableStateOf(false) }
+    var installLaunchError by remember { mutableStateOf<String?>(null) }
+
+    fun launchApkInstaller(ctx: Context, apkPath: String) {
+        try {
+            val apkFile = File(apkPath)
+            val apkUri = FileProvider.getUriForFile(
+                ctx,
+                "${ctx.packageName}.fileprovider",
+                apkFile
+            )
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(installIntent)
+            installLaunchError = null
+        } catch (e: Exception) {
+            installLaunchError = e.localizedMessage ?: "Unable to launch package installer"
+        }
+    }
+
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            context.packageManager.canRequestPackageInstalls()
+        if (canInstall) {
+            needsInstallPermission = false
+            pendingInstallApkPath?.let { path ->
+                launchApkInstaller(context, path)
+            }
+        } else {
+            needsInstallPermission = true
+        }
+    }
+
+    fun triggerInstall(apkPath: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            pendingInstallApkPath = apkPath
+            needsInstallPermission = true
+            try {
+                val settingsIntent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}")
+                )
+                unknownSourcesLauncher.launch(settingsIntent)
+            } catch (e: Exception) {
+                installLaunchError = e.localizedMessage ?: "Unable to open install permission settings"
+            }
+        } else {
+            needsInstallPermission = false
+            launchApkInstaller(context, apkPath)
+        }
+    }
+
+    LaunchedEffect(updateUiState) {
+        if (updateUiState is UpdateUiState.ReadyToInstall &&
+            launchedInstallForPath != updateUiState.apkFilePath
+        ) {
+            launchedInstallForPath = updateUiState.apkFilePath
+            triggerInstall(updateUiState.apkFilePath)
+        } else if (updateUiState !is UpdateUiState.ReadyToInstall) {
+            launchedInstallForPath = null
+            needsInstallPermission = false
+            installLaunchError = null
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -463,6 +545,156 @@ private fun AppVersionAndUpdateDialog(
                         }
                     }
 
+                    is UpdateUiState.Downloading -> {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_downloading_card"),
+                            shape = RoundedCornerShape(12.dp),
+                            color = AppSurfaceElevated,
+                            border = BorderStroke(1.dp, BrandPrimary.copy(alpha = 0.6f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Downloading Ver ${updateUiState.latestVersion}...",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    updateUiState.progressPercent?.let { pct ->
+                                        Text(
+                                            text = "$pct%",
+                                            color = BrandPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                                val progressPct = updateUiState.progressPercent
+                                if (progressPct != null) {
+                                    LinearProgressIndicator(
+                                        progress = { progressPct / 100f },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                        color = BrandPrimary,
+                                        trackColor = AppBorder
+                                    )
+                                } else {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                        color = BrandPrimary,
+                                        trackColor = AppBorder
+                                    )
+                                }
+                                Text(
+                                    text = "The installer will open automatically once downloaded.",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+
+                    is UpdateUiState.ReadyToInstall -> {
+                        val hasError = installLaunchError != null
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_ready_card"),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (hasError) {
+                                BrandErrorContainer.copy(alpha = 0.45f)
+                            } else {
+                                BrandSuccessContainer.copy(alpha = 0.45f)
+                            },
+                            border = BorderStroke(1.dp, if (hasError) BrandError else BrandSuccess)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = AppIcons.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = if (hasError) BrandError else BrandSuccess,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Update Ready (Ver ${updateUiState.latestVersion})",
+                                        color = if (hasError) BrandError else BrandSuccess,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                Text(
+                                    text = when {
+                                        installLaunchError != null -> installLaunchError!!
+                                        needsInstallPermission ->
+                                            "Allow installing unknown apps in Settings to finish updating automatically."
+                                        else -> "Opening Android installer..."
+                                    },
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    is UpdateUiState.DownloadFailed -> {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("update_download_failed_card"),
+                            shape = RoundedCornerShape(12.dp),
+                            color = BrandErrorContainer.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, BrandError)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = AppIcons.CloudOff,
+                                    contentDescription = null,
+                                    tint = BrandError,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "Update download failed (Ver ${updateUiState.latestVersion})",
+                                        color = BrandError,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = updateUiState.message,
+                                        color = TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     is UpdateUiState.Result -> {
                         when (val result = updateUiState.checkResult) {
                             is UpdateCheckResult.UpdateAvailable -> {
@@ -499,7 +731,7 @@ private fun AppVersionAndUpdateDialog(
                                             fontSize = 12.sp
                                         )
                                         Text(
-                                            text = "An update is available. Would you like to update now or later?",
+                                            text = "An update is available. Would you like to download and install it now or later?",
                                             color = TextPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium
@@ -594,40 +826,94 @@ private fun AppVersionAndUpdateDialog(
             }
         },
         confirmButton = {
-            val updateResult = (updateUiState as? UpdateUiState.Result)?.checkResult
-            when (updateResult) {
-                is UpdateCheckResult.UpdateAvailable -> {
+            when (updateUiState) {
+                is UpdateUiState.Downloading -> {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("update_cancel_download_button")
+                    ) {
+                        Text("Cancel", color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                is UpdateUiState.ReadyToInstall -> {
+                    Button(
+                        onClick = { triggerInstall(updateUiState.apkFilePath) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = BrandOnPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("update_install_now_button")
+                    ) {
+                        Text(
+                            text = if (needsInstallPermission) "Allow & Install" else "Install Now",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                is UpdateUiState.DownloadFailed -> {
                     Button(
                         onClick = {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateResult.releaseUrl))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {
-                            }
-                            onDismiss()
+                            onStartUpdate(updateUiState.latestVersion, updateUiState.releaseUrl)
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = BrandPrimary,
                             contentColor = BrandOnPrimary
                         ),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("update_download_button")
+                        modifier = Modifier.testTag("update_retry_download_button")
                     ) {
-                        Text("Update", fontWeight = FontWeight.Bold)
+                        Text("Retry", fontWeight = FontWeight.Bold)
                     }
                 }
 
-                is UpdateCheckResult.Error -> {
-                    Button(
-                        onClick = onRetry,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BrandPrimary,
-                            contentColor = BrandOnPrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("update_retry_button")
-                    ) {
-                        Text("Retry", fontWeight = FontWeight.Bold)
+                is UpdateUiState.Result -> {
+                    when (val updateResult = updateUiState.checkResult) {
+                        is UpdateCheckResult.UpdateAvailable -> {
+                            Button(
+                                onClick = {
+                                    onStartUpdate(updateResult.latestVersion, updateResult.releaseUrl)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BrandPrimary,
+                                    contentColor = BrandOnPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("update_download_button")
+                            ) {
+                                Text("Update", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        is UpdateCheckResult.Error -> {
+                            Button(
+                                onClick = onRetry,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BrandPrimary,
+                                    contentColor = BrandOnPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("update_retry_button")
+                            ) {
+                                Text("Retry", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = onDismiss,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = BrandPrimary,
+                                    contentColor = BrandOnPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("update_ok_button")
+                            ) {
+                                Text("OK", fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
 
@@ -647,9 +933,8 @@ private fun AppVersionAndUpdateDialog(
             }
         },
         dismissButton = {
-            val updateResult = (updateUiState as? UpdateUiState.Result)?.checkResult
-            when (updateResult) {
-                is UpdateCheckResult.UpdateAvailable -> {
+            when (updateUiState) {
+                is UpdateUiState.ReadyToInstall -> {
                     TextButton(
                         onClick = onDismiss,
                         modifier = Modifier.testTag("update_later_button")
@@ -657,11 +942,49 @@ private fun AppVersionAndUpdateDialog(
                         Text("Later", color = TextSecondary, fontWeight = FontWeight.SemiBold)
                     }
                 }
-                is UpdateCheckResult.Error -> {
-                    TextButton(onClick = onDismiss) {
-                        Text("Close", color = TextSecondary)
+
+                is UpdateUiState.DownloadFailed -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateUiState.releaseUrl))
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                }
+                            },
+                            modifier = Modifier.testTag("update_open_browser_button")
+                        ) {
+                            Text("Browser", color = BrandPrimary, fontWeight = FontWeight.SemiBold)
+                        }
+                        TextButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("update_later_button")
+                        ) {
+                            Text("Later", color = TextSecondary)
+                        }
                     }
                 }
+
+                is UpdateUiState.Result -> {
+                    when (updateUiState.checkResult) {
+                        is UpdateCheckResult.UpdateAvailable -> {
+                            TextButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.testTag("update_later_button")
+                            ) {
+                                Text("Later", color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        is UpdateCheckResult.Error -> {
+                            TextButton(onClick = onDismiss) {
+                                Text("Close", color = TextSecondary)
+                            }
+                        }
+                        else -> Unit
+                    }
+                }
+
                 else -> Unit
             }
         }

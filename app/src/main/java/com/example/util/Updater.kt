@@ -2,11 +2,15 @@ package com.example.util
 
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.coroutines.coroutineContext
 
 sealed class UpdateCheckResult {
     data class UpdateAvailable(
@@ -31,7 +35,7 @@ sealed class UpdateCheckResult {
 /**
  * Utility class that checks the '4RetAppMaster/DartsTracker' GitHub repository
  * (Releases, Tags, root APK files, and app/build.gradle.kts) for newer versions
- * compared to [BuildConfig.VERSION_NAME].
+ * and downloads APK packages for installation.
  */
 object Updater {
 
@@ -50,6 +54,9 @@ object Updater {
         "https://github.com/$REPO_PATH/releases"
 
     private const val TIMEOUT_MS = 10_000
+    private const val DOWNLOAD_TIMEOUT_MS = 30_000
+    private const val MAX_REDIRECTS = 6
+    private const val MIN_VALID_APK_BYTES = 100 * 1024L
 
     private val LEADING_VERSION_PREFIX_REGEX = Regex("^(?i)(ver\\.?\\s*|v\\s*)")
     private val EMBEDDED_SEMVER_REGEX = Regex("""(?i)(?:ver\.?\s*|v)?(\d+(?:\.\d+)+)""")
@@ -133,6 +140,153 @@ object Updater {
         }
     }
 
+    suspend fun downloadApk(
+        downloadUrl: String,
+        latestVersion: String,
+        destinationFile: File,
+        onProgress: (Int?) -> Unit
+    ): Result<File> = withContext(Dispatchers.IO) {
+        val candidateUrls = buildList {
+            add(downloadUrl)
+            val fallbackRawApk = "https://raw.githubusercontent.com/$REPO_PATH/HEAD/DartTracker-Ver$latestVersion.apk"
+            if (!downloadUrl.equals(fallbackRawApk, ignoreCase = true) && !downloadUrl.endsWith(".apk", ignoreCase = true)) {
+                add(fallbackRawApk)
+            }
+        }
+
+        var lastError: Exception? = null
+        for (url in candidateUrls) {
+            coroutineContext.ensureActive()
+            val attempt = try {
+                Result.success(downloadSingleApk(url, destinationFile, onProgress))
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            if (attempt.isSuccess) {
+                return@withContext attempt
+            }
+            lastError = attempt.exceptionOrNull() as? Exception
+                ?: Exception(attempt.exceptionOrNull()?.message ?: "Download failed")
+        }
+
+        Result.failure(lastError ?: IllegalStateException("Unable to download APK update"))
+    }
+
+    private suspend fun downloadSingleApk(
+        initialUrl: String,
+        destinationFile: File,
+        onProgress: (Int?) -> Unit
+    ): File {
+        destinationFile.parentFile?.mkdirs()
+        val tempFile = File(destinationFile.parentFile, "${destinationFile.name}.tmp")
+        if (tempFile.exists()) tempFile.delete()
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = openFollowingRedirects(initialUrl)
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                throw IllegalStateException("Download failed with HTTP $responseCode")
+            }
+
+            val totalBytes = connection.contentLengthLong
+            var downloadedBytes = 0L
+            var lastReportedPct = -1
+
+            connection.inputStream.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    val buffer = ByteArray(16 * 1024)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        downloadedBytes += read
+                        if (totalBytes > 0L) {
+                            val pct = ((downloadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                            if (pct != lastReportedPct) {
+                                lastReportedPct = pct
+                                onProgress(pct)
+                            }
+                        } else if (lastReportedPct == -1) {
+                            lastReportedPct = 0
+                            onProgress(null)
+                        }
+                    }
+                    output.flush()
+                }
+            }
+
+            if (!isValidApkFile(tempFile)) {
+                tempFile.delete()
+                throw IllegalArgumentException("Update link did not return a valid APK file")
+            }
+
+            if (destinationFile.exists()) {
+                destinationFile.delete()
+            }
+            if (!tempFile.renameTo(destinationFile)) {
+                tempFile.copyTo(destinationFile, overwrite = true)
+                tempFile.delete()
+            }
+            onProgress(100)
+            return destinationFile
+        } catch (e: Exception) {
+            if (tempFile.exists()) tempFile.delete()
+            throw e
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    internal fun isValidApkFile(file: File): Boolean {
+        if (!file.exists() || file.length() < MIN_VALID_APK_BYTES) return false
+        return try {
+            file.inputStream().use { stream ->
+                val b0 = stream.read()
+                val b1 = stream.read()
+                b0 == 0x50 && b1 == 0x4B // 'PK' ZIP/APK header
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun openFollowingRedirects(initialUrl: String): HttpURLConnection {
+        var currentUrl = initialUrl
+        for (hop in 0..MAX_REDIRECTS) {
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = TIMEOUT_MS
+                readTimeout = DOWNLOAD_TIMEOUT_MS
+                useCaches = false
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
+                setRequestProperty("Cache-Control", "no-cache")
+                setRequestProperty("User-Agent", "DartsTracker-Android/${BuildConfig.VERSION_NAME}")
+            }
+            val code = conn.responseCode
+            if (code == HttpURLConnection.HTTP_MOVED_PERM ||
+                code == HttpURLConnection.HTTP_MOVED_TEMP ||
+                code == HttpURLConnection.HTTP_SEE_OTHER ||
+                code == 307 ||
+                code == 308
+            ) {
+                val location = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (location.isNullOrBlank()) {
+                    throw IllegalStateException("Redirect without Location header")
+                }
+                currentUrl = URL(URL(currentUrl), location).toString()
+                continue
+            }
+            return conn
+        }
+        throw IllegalStateException("Too many redirects while downloading update")
+    }
+
     private fun checkReleasesList(normalizedCurrent: String): UpdateCheckResult? {
         val resp = runCatching { fetchText(GITHUB_RELEASES_LIST_URL) }.getOrNull() ?: return null
         if (resp.responseCode !in 200..299 || resp.body.isBlank()) return null
@@ -183,11 +337,17 @@ object Updater {
         if (bestTagVersion == null || bestTagName == null) return null
 
         return if (isNewerVersion(bestTagVersion, normalizedCurrent)) {
+            val rawApkUrl = "https://github.com/$REPO_PATH/raw/$bestTagName/DartTracker-Ver$bestTagVersion.apk"
+            val resolvedUrl = if (runCatching { urlExists(rawApkUrl) }.getOrDefault(false)) {
+                rawApkUrl
+            } else {
+                "https://github.com/$REPO_PATH/releases/tag/$bestTagName"
+            }
             UpdateCheckResult.UpdateAvailable(
                 currentVersion = normalizedCurrent,
                 latestVersion = bestTagVersion,
                 tagName = bestTagName,
-                releaseUrl = "https://github.com/$REPO_PATH/releases/tag/$bestTagName",
+                releaseUrl = resolvedUrl,
                 releaseNotes = null
             )
         } else {
@@ -264,7 +424,7 @@ object Updater {
         val normalizedLatest = parseGradleVersionName(resp.body) ?: return null
 
         return if (isNewerVersion(normalizedLatest, normalizedCurrent)) {
-            val candidateApkUrl = "https://github.com/$REPO_PATH/raw/HEAD/DartTracker-Ver$normalizedLatest.apk"
+            val candidateApkUrl = "https://raw.githubusercontent.com/$REPO_PATH/HEAD/DartTracker-Ver$normalizedLatest.apk"
             val apkExists = runCatching { urlExists(candidateApkUrl) }.getOrDefault(false)
             val targetUrl = if (apkExists) candidateApkUrl else "https://github.com/$REPO_PATH"
             UpdateCheckResult.UpdateAvailable(

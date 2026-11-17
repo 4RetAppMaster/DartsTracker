@@ -105,4 +105,31 @@ class UpdaterTest {
         assertEquals("2.1", extracted)
         assertTrue(Updater.isNewerVersion(extracted!!, "2.0"))
     }
+
+    @Test
+    fun isValidApkFile_validatesZipHeaderAndMinimumSize() {
+        val tinyApk = java.io.File.createTempFile("tiny", ".apk").apply {
+            writeBytes(byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+            deleteOnExit()
+        }
+        assertFalse(Updater.isValidApkFile(tinyApk))
+
+        val htmlFile = java.io.File.createTempFile("webpage", ".apk").apply {
+            val htmlBytes = ("<html><body>Not an APK</body></html>").repeat(4000).toByteArray()
+            writeBytes(htmlBytes)
+            deleteOnExit()
+        }
+        assertFalse(Updater.isValidApkFile(htmlFile))
+
+        val validApk = java.io.File.createTempFile("valid", ".apk").apply {
+            val bytes = ByteArray(110 * 1024)
+            bytes[0] = 0x50
+            bytes[1] = 0x4B
+            bytes[2] = 0x03
+            bytes[3] = 0x04
+            writeBytes(bytes)
+            deleteOnExit()
+        }
+        assertTrue(Updater.isValidApkFile(validApk))
+    }
 }

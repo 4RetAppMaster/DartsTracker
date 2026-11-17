@@ -65,6 +65,21 @@ sealed class UpdateUiState {
     data object Idle : UpdateUiState()
     data object Checking : UpdateUiState()
     data class Result(val checkResult: UpdateCheckResult) : UpdateUiState()
+    data class Downloading(
+        val latestVersion: String,
+        val releaseUrl: String,
+        val progressPercent: Int?
+    ) : UpdateUiState()
+    data class ReadyToInstall(
+        val latestVersion: String,
+        val apkFilePath: String,
+        val releaseUrl: String
+    ) : UpdateUiState()
+    data class DownloadFailed(
+        val latestVersion: String,
+        val releaseUrl: String,
+        val message: String
+    ) : UpdateUiState()
 }
 
 class DartsViewModel(application: Application) : AndroidViewModel(application) {
@@ -78,6 +93,7 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
     val updateUiState: StateFlow<UpdateUiState> = _updateUiState.asStateFlow()
 
     private var updateCheckJob: kotlinx.coroutines.Job? = null
+    private var updateDownloadJob: kotlinx.coroutines.Job? = null
     private var shouldCheckOnNextOpen = false
 
     init {
@@ -89,10 +105,18 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onAppBackgrounded() {
-        shouldCheckOnNextOpen = true
+        val currentState = _updateUiState.value
+        if (currentState !is UpdateUiState.Downloading && currentState !is UpdateUiState.ReadyToInstall) {
+            shouldCheckOnNextOpen = true
+        }
     }
 
     fun onAppOpened() {
+        val currentState = _updateUiState.value
+        if (currentState is UpdateUiState.Downloading || currentState is UpdateUiState.ReadyToInstall) {
+            shouldCheckOnNextOpen = false
+            return
+        }
         if (!shouldCheckOnNextOpen) return
         shouldCheckOnNextOpen = false
         checkForUpdates(userInitiated = false)
@@ -113,7 +137,55 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun startAutomaticUpdate(latestVersion: String, releaseUrl: String) {
+        updateDownloadJob?.cancel()
+        _showUpdateDialog.value = true
+        _updateUiState.value = UpdateUiState.Downloading(
+            latestVersion = latestVersion,
+            releaseUrl = releaseUrl,
+            progressPercent = null
+        )
+
+        val updatesDir = java.io.File(getApplication<Application>().cacheDir, "updates")
+        val apkFile = java.io.File(updatesDir, "DartsTracker-Ver$latestVersion.apk")
+
+        updateDownloadJob = viewModelScope.launch {
+            val result = Updater.downloadApk(
+                downloadUrl = releaseUrl,
+                latestVersion = latestVersion,
+                destinationFile = apkFile,
+                onProgress = { pct ->
+                    val current = _updateUiState.value
+                    if (current is UpdateUiState.Downloading && current.latestVersion == latestVersion) {
+                        _updateUiState.value = current.copy(progressPercent = pct)
+                    }
+                }
+            )
+            result.onSuccess { downloadedFile ->
+                _updateUiState.value = UpdateUiState.ReadyToInstall(
+                    latestVersion = latestVersion,
+                    apkFilePath = downloadedFile.absolutePath,
+                    releaseUrl = releaseUrl
+                )
+            }.onFailure { err ->
+                _updateUiState.value = UpdateUiState.DownloadFailed(
+                    latestVersion = latestVersion,
+                    releaseUrl = releaseUrl,
+                    message = err.localizedMessage ?: "Unable to download APK update"
+                )
+            }
+        }
+    }
+
     fun dismissUpdateDialog() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
+        if (_updateUiState.value is UpdateUiState.Downloading ||
+            _updateUiState.value is UpdateUiState.ReadyToInstall ||
+            _updateUiState.value is UpdateUiState.DownloadFailed
+        ) {
+            _updateUiState.value = UpdateUiState.Idle
+        }
         _showUpdateDialog.value = false
     }
 
