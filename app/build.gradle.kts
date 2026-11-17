@@ -17,9 +17,9 @@ android {
     applicationId = "com.aistudio.dartscounter.dkqzt"
     minSdk = 24
     targetSdk = 36
-    // Versioning rule: start at "1.0" ("Ver 1.0") and increment by 0.1 with every change (current: "2.2", next: "2.3")
-    versionCode = 13
-    versionName = "2.2"
+    // Versioning rule: start at "1.0" ("Ver 1.0") and increment by 0.1 with every change (current: "2.3", next: "2.4")
+    versionCode = 14
+    versionName = "2.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -35,6 +37,7 @@ import com.example.ui.theme.*
 import com.example.util.UpdateCheckResult
 import com.example.viewmodel.DartsViewModel
 import com.example.viewmodel.UpdateUiState
+import kotlinx.coroutines.launch
 
 enum class MainTab {
     PLAY,
@@ -47,13 +50,25 @@ fun MainScreen(
     viewModel: DartsViewModel,
     modifier: Modifier = Modifier
 ) {
-    var currentTab by remember { mutableStateOf(MainTab.PLAY) }
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 2 })
+    val coroutineScope = rememberCoroutineScope()
+    val currentTab by remember {
+        derivedStateOf {
+            if (pagerState.targetPage == MainTab.PLAYERS.ordinal) MainTab.PLAYERS else MainTab.PLAY
+        }
+    }
     var showExitMatchDialog by remember { mutableStateOf(false) }
 
     val activeMatch by viewModel.activeMatch.collectAsStateWithLifecycle()
     val activeTournament by viewModel.tournamentState.collectAsStateWithLifecycle()
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val updateUiState by viewModel.updateUiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(activeMatch) {
+        if (activeMatch != null && pagerState.currentPage != 0) {
+            pagerState.scrollToPage(0)
+        }
+    }
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -87,9 +102,11 @@ fun MainScreen(
         showExitMatchDialog = true
     }
 
-    // If on Players tab, go back to Play tab
-    BackHandler(enabled = currentTab != MainTab.PLAY && activeMatch == null && !showUpdateDialog) {
-        currentTab = MainTab.PLAY
+    // If on Players tab, swipe/animate back to Play tab
+    BackHandler(enabled = pagerState.currentPage != MainTab.PLAY.ordinal && activeMatch == null && !showUpdateDialog) {
+        coroutineScope.launch {
+            pagerState.animateScrollToPage(MainTab.PLAY.ordinal)
+        }
     }
 
     Scaffold(
@@ -205,7 +222,11 @@ fun MainScreen(
                     ) {
                         CompactBottomNavItem(
                             selected = (currentTab == MainTab.PLAY),
-                            onClick = { currentTab = MainTab.PLAY },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(MainTab.PLAY.ordinal)
+                                }
+                            },
                             icon = if (activeTournament != null) AppIcons.EmojiEvents else AppIcons.Adjust,
                             label = if (activeTournament != null) "Tournament" else "Darts Match",
                             contentDescription = "Play",
@@ -217,7 +238,11 @@ fun MainScreen(
 
                         CompactBottomNavItem(
                             selected = (currentTab == MainTab.PLAYERS),
-                            onClick = { currentTab = MainTab.PLAYERS },
+                            onClick = {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(MainTab.PLAYERS.ordinal)
+                                }
+                            },
                             icon = AppIcons.People,
                             label = "Players",
                             contentDescription = "Players",
@@ -231,13 +256,16 @@ fun MainScreen(
             }
         }
     ) { innerPadding ->
-        Box(
+        HorizontalPager(
+            state = pagerState,
+            userScrollEnabled = (activeMatch == null),
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-        ) {
-            when (currentTab) {
-                MainTab.PLAY -> {
+                .testTag("main_tab_pager")
+        ) { page ->
+            when (page) {
+                MainTab.PLAY.ordinal -> {
                     when {
                         activeMatch != null -> {
                             LiveScoringScreen(viewModel = viewModel)
@@ -250,7 +278,7 @@ fun MainScreen(
                         }
                     }
                 }
-                MainTab.PLAYERS -> {
+                else -> {
                     PlayersScreen(viewModel = viewModel)
                 }
             }
