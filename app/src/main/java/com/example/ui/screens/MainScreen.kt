@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -54,11 +55,19 @@ fun MainScreen(
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsStateWithLifecycle()
     val updateUiState by viewModel.updateUiState.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, viewModel) {
+    DisposableEffect(lifecycleOwner, viewModel, context) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_START) {
-                viewModel.onAppOpened()
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onAppOpened()
+                Lifecycle.Event.ON_STOP -> {
+                    val isConfigChange = (context as? Activity)?.isChangingConfigurations == true
+                    if (!isConfigChange) {
+                        viewModel.onAppBackgrounded()
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

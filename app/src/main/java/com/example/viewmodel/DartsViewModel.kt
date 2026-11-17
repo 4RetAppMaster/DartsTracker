@@ -77,50 +77,43 @@ class DartsViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateUiState = MutableStateFlow<UpdateUiState>(UpdateUiState.Idle)
     val updateUiState: StateFlow<UpdateUiState> = _updateUiState.asStateFlow()
 
-    private var hasDismissedUpdateThisSession = false
-    private var lastUpdateCheckTimeMs = 0L
+    private var updateCheckJob: kotlinx.coroutines.Job? = null
+    private var shouldCheckOnNextOpen = false
 
     init {
         val db = AppDatabase.getDatabase(application)
         repository = PlayerRepository(db.playerDao())
 
-        // Silent check on startup; surface dialog automatically only if a newer version exists
+        // Always check for updates automatically when the app opens
         checkForUpdates(userInitiated = false)
     }
 
+    fun onAppBackgrounded() {
+        shouldCheckOnNextOpen = true
+    }
+
     fun onAppOpened() {
-        if (hasDismissedUpdateThisSession || _showUpdateDialog.value) return
-        if (_updateUiState.value is UpdateUiState.Checking) return
-        val lastResult = (_updateUiState.value as? UpdateUiState.Result)?.checkResult
-        val now = System.currentTimeMillis()
-        val cooldownMs = 60_000L
-        if (lastResult is UpdateCheckResult.Error || now - lastUpdateCheckTimeMs >= cooldownMs) {
-            checkForUpdates(userInitiated = false)
-        }
+        if (!shouldCheckOnNextOpen) return
+        shouldCheckOnNextOpen = false
+        checkForUpdates(userInitiated = false)
     }
 
     fun checkForUpdates(userInitiated: Boolean) {
         if (userInitiated) {
-            hasDismissedUpdateThisSession = false
             _showUpdateDialog.value = true
         }
-        lastUpdateCheckTimeMs = System.currentTimeMillis()
+        updateCheckJob?.cancel()
         _updateUiState.value = UpdateUiState.Checking
-        viewModelScope.launch {
+        updateCheckJob = viewModelScope.launch {
             val result = Updater.checkForUpdate()
-            lastUpdateCheckTimeMs = System.currentTimeMillis()
             _updateUiState.value = UpdateUiState.Result(result)
-            if (!userInitiated && result is UpdateCheckResult.UpdateAvailable && !hasDismissedUpdateThisSession) {
+            if (!userInitiated && result is UpdateCheckResult.UpdateAvailable) {
                 _showUpdateDialog.value = true
             }
         }
     }
 
     fun dismissUpdateDialog() {
-        val result = (_updateUiState.value as? UpdateUiState.Result)?.checkResult
-        if (result is UpdateCheckResult.UpdateAvailable) {
-            hasDismissedUpdateThisSession = true
-        }
         _showUpdateDialog.value = false
     }
 
