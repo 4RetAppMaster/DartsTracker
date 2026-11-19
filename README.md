@@ -1,6 +1,6 @@
 "You duuude wanna hit the board?"<br/>
 "Sure buddy! We can count the points in my app... Oh wait another ad. Lets just drink."<br/>
-This ever happened to you?<br/>
+Is this ever happened to you?<br/>
 NOT ANYMORE! With DartsTracker you can easily track your darts match points.<br/>
 Play a Quick match or host a Tournament!<br/>
 Set the rules and gamemodes then throw the darts!<br/>
