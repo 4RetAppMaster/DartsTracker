@@ -1,11 +1,11 @@
-"You duuude wanna hit the board?"
-"Sure buddy! We can count the points in my app... Oh wait another ad. Lets just drink."
-This ever happened to you?
-NOT ANYMORE! With DartsTracker you can easily track your darts match points.
-Play a Quick match or host a Tournament!
-Set the rules and gamemodes then throw the darts!
-Ads free and nothing blocked by paywall.
-"Luke Li...WHO? IM ON A STRIKE, MOM with DartsTracker!!!"
+"You duuude wanna hit the board?"<br/>
+"Sure buddy! We can count the points in my app... Oh wait another ad. Lets just drink."<br/>
+This ever happened to you?<br/>
+NOT ANYMORE! With DartsTracker you can easily track your darts match points.<br/>
+Play a Quick match or host a Tournament!<br/>
+Set the rules and gamemodes then throw the darts!<br/>
+Ads free and nothing blocked by paywall.<br/>
+### "Luke Li...WHO? IM ON A STRIKE, MOM with DartsTracker!!!"
 
 1. Download APK
 2. Install APK
